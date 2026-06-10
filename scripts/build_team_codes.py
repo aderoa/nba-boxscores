@@ -52,10 +52,18 @@ RULES = [
     ("VAN","MEM","Vancouver Grizzlies",None,None),
     ("CHP","WAS","Chicago Packers",None,None), ("CHZ","WAS","Chicago Zephyrs",None,None),
     ("CAP","WAS","Capital Bullets",None,None), ("WSB","WAS","Washington Bullets",None,None),
-    # --- era-split: BAL ---
+    # --- era-split: BAL / BLT (stats uses both spellings) ---
     ("BAL","BAL","Baltimore Bullets (BAA)",None,1955),
     ("BAL","WAS","Baltimore Bullets",1956,None),
+    ("BLT","BAL","Baltimore Bullets (BAA)",None,1955),
+    ("BLT","WAS","Baltimore Bullets",1956,None),
     ("BLB","BAL","Baltimore Bullets (BAA)",None,None),
+    # --- stats spellings confirmed by data audit ---
+    ("DEF","DTF","Detroit Falcons",None,None),
+    ("HUS","TOH","Toronto Huskies",None,None),
+    ("MIH","ATL","Milwaukee Hawks",None,None),
+    ("SAN","SAS","San Antonio Spurs",None,None),
+    ("UTH","UTA","Utah Jazz",None,None),
     # --- defunct franchises (own HH codes) ---
     ("AND","AND","Anderson Packers",None,None),
     ("CHS","CHS","Chicago Stags",None,None),
