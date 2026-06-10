@@ -1,0 +1,55 @@
+name: Backfill all-time box scores
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_season_end:
+        description: "First season END year (1947 = the 1946-47 season)"
+        required: true
+        default: "1947"
+      end_season_end:
+        description: "Last season END year (inclusive)"
+        required: true
+        default: "2026"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: boxscore-backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure git identity (script commits its own progress)
+        run: |
+          git config user.name "boxscore-bot"
+          git config user.email "actions@users.noreply.github.com"
+
+      - name: Run backfill
+        env:
+          START_SEASON_END: ${{ github.event.inputs.start_season_end }}
+          END_SEASON_END: ${{ github.event.inputs.end_season_end }}
+        run: python scripts/backfill_boxscores.py
+
+      - name: Final commit (safety net)
+        if: always()
+        run: |
+          git add -A data backfill_state.json || true
+          if git diff --cached --quiet; then
+            echo "Nothing left to commit."
+          else
+            git commit -m "Backfill progress (run end)"
+            git push
+          fi

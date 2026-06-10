@@ -1,0 +1,41 @@
+name: Daily box score update
+
+on:
+  schedule:
+    # 10:00 UTC ≈ 5–6am ET — safely after West Coast finals are archived
+    - cron: "0 10 * * *"
+  workflow_dispatch: {}   # manual "Run workflow" button for testing
+
+permissions:
+  contents: write         # lets the built-in GITHUB_TOKEN push the commit
+
+concurrency:
+  group: boxscore-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run updater
+        run: python scripts/update_boxscores.py
+
+      - name: Commit & push if changed
+        run: |
+          git config user.name "boxscore-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A data state.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Box scores through $(date -u +%F)"
+            git push
+          fi
