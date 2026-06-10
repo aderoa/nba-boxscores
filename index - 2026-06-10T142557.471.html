@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Box Score Database — Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0b1a;--panel:#14142b;--panel2:#1b1b36;--line:#2a2a4d;--tx:#e8e8f4;--dim:#8a8ab0;--gold:#ffd24d;--acc:#ff5a36;--green:#34d97a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;min-height:100vh}
+.wrap{max-width:1060px;margin:0 auto;padding:22px 16px 60px}
+h1{font-family:'Oswald',sans-serif;font-size:26px;letter-spacing:2px;text-transform:uppercase}
+h1 b{color:var(--gold)}
+.sub{color:var(--dim);margin:4px 0 18px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;background:var(--panel);color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:9px 18px;cursor:pointer}
+.tabs button.on{color:var(--gold);border-color:var(--gold)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+input,select{background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--tx);font-family:inherit;font-size:13px;padding:8px 10px}
+input:focus,select:focus{outline:none;border-color:var(--gold)}
+button.go{font-family:'Oswald',sans-serif;letter-spacing:1px;text-transform:uppercase;background:var(--gold);color:#1a1400;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer}
+.status{color:var(--dim);margin:8px 2px}
+.glist{display:flex;flex-direction:column;gap:8px}
+.gcard{display:flex;justify-content:space-between;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer}
+.gcard:hover{border-color:var(--gold)}
+.gcard .sc{font-family:'Oswald',sans-serif;font-size:16px}
+.gcard .sc b{color:var(--gold)}
+.gcard small{color:var(--dim)}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+td:first-child,th:first-child{text-align:left}
+tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
+.teamhd{font-family:'Oswald',sans-serif;font-size:17px;letter-spacing:1px;margin:18px 0 2px}
+.teamhd b{color:var(--gold)}
+.suggest{position:relative}
+.sugbox{position:absolute;top:100%;left:0;right:0;z-index:5;background:var(--panel2);border:1px solid var(--line);border-radius:8px;max-height:240px;overflow:auto;display:none}
+.sugbox div{padding:7px 10px;cursor:pointer}
+.sugbox div:hover{background:var(--line)}
+.pill{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:5px 12px;margin:3px 4px 0 0;cursor:pointer}
+.pill:hover{border-color:var(--gold)}
+.bk{color:var(--dim);cursor:pointer;margin-bottom:10px;display:inline-block}
+.bk:hover{color:var(--gold)}
+.note{color:var(--dim);font-size:11px;margin-top:10px}
+@media(max-width:700px){th,td{padding:5px 5px;font-size:11px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NBA <b>Box Score Database</b></h1>
+  <div class="sub">Every game since 1946-47 · updated daily</div>
+
+  <div class="tabs">
+    <button id="tabDate" class="on">By date</button>
+    <button id="tabTeam">By team</button>
+    <button id="tabPlayer">By player</button>
+  </div>
+
+  <div class="panel" id="paneDate">
+    <div class="row">
+      <label>Game date</label>
+      <input type="date" id="dateInput" value="">
+      <button class="go" id="dateGo">Show games</button>
+    </div>
+  </div>
+
+  <div class="panel" id="paneTeam" style="display:none">
+    <div class="row">
+      <label>Season</label><select id="teamSeason"></select>
+      <label>Team</label><select id="teamSel"><option>load a season…</option></select>
+      <button class="go" id="teamGo">Show games</button>
+    </div>
+  </div>
+
+  <div class="panel" id="panePlayer" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="flex:1;min-width:240px">
+        <label>Player</label><br>
+        <input type="text" id="playerInput" placeholder="start typing a name…" style="width:100%" autocomplete="off">
+        <div class="sugbox" id="sugbox"></div>
+      </div>
+    </div>
+    <div id="playerSeasons"></div>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div id="out"></div>
+  <div class="note">Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
+</div>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
+const cache={games:{},box:{},idx:null};
+let activeTab="Date";
+
+// ---------- data loading ----------
+async function fetchNDJSON(path){
+  const r=await fetch(path,{cache:"no-cache"});
+  if(!r.ok)throw new Error(path+" -> HTTP "+r.status);
+  const t=await r.text(),out=[];
+  for(const line of t.split("\n")){const s=line.trim();if(!s)continue;try{out.push(JSON.parse(s))}catch(e){}}
+  return out;
+}
+async function games(sy){
+  if(!cache.games[sy])cache.games[sy]=await fetchNDJSON(`data/${sy}/games.ndjson`);
+  return cache.games[sy];
+}
+async function box(sy){
+  if(!cache.box[sy]){
+    status(`loading ${fmtSeason(sy)} box scores…`);
+    cache.box[sy]=await fetchNDJSON(`data/${sy}/boxscores.ndjson`);
+  }
+  return cache.box[sy];
+}
+async function playerIndex(){
+  if(!cache.idx){
+    status("loading player index…");
+    const r=await fetch("data/player_index.json",{cache:"no-cache"});
+    if(!r.ok)throw new Error("player_index.json missing — run scripts/build_player_index.py and push it");
+    cache.idx=await r.json();
+    cache.idxNames=Object.keys(cache.idx);
+  }
+  return cache.idx;
+}
+
+// ---------- utils ----------
+function fmtSeason(sy){return (sy-1)+"-"+String(sy).slice(-2).padStart(2,"0")}
+function status(s){$("status").textContent=s||""}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function v(x){return x==null?"—":x}
+function seasonCandidates(dateStr){
+  const [y,m]=dateStr.split("-").map(Number);
+  // Sep–Dec → season ends next year. Jan–Jun → ends this year.
+  // Jul/Aug ambiguous (2020 bubble): try same-year end first, then next.
+  if(m>=9)return [y+1];
+  if(m<=6)return [y];
+  return [y,y+1];
+}
+
+// ---------- rendering ----------
+function gameCards(list,title){
+  let h=title?`<div class="teamhd">${title}</div>`:"";
+  h+='<div class="glist">';
+  for(const g of list){
+    h+=`<div class="gcard" onclick="openGame(${g.sy},'${esc(g.gameId)}')">
+      <span class="sc">${esc(g.away)} <b>${v(g.awayScore)}</b> @ ${esc(g.home)} <b>${v(g.homeScore)}</b></span>
+      <small>${esc(g.date)} · ${fmtSeason(g.sy)} · ${esc(g.gameId)}</small></div>`;
+  }
+  return h+"</div>";
+}
+const COLS=[["min","MIN"],["pts","PTS"],["fgm","FGM"],["fga","FGA"],["tpm","3PM"],["tpa","3PA"],["ftm","FTM"],["fta","FTA"],["oreb","ORB"],["dreb","DRB"],["reb","REB"],["ast","AST"],["stl","STL"],["blk","BLK"],["tov","TOV"],["pf","PF"],["pm","+/-"]];
+function teamTable(name,rows){
+  rows=rows.slice().sort((a,b)=>(b.min||0)-(a.min||0)||(b.pts||0)-(a.pts||0));
+  let h=`<div class="teamhd"><b>${esc(name)}</b></div><table><tr><th>Player</th>`;
+  for(const[,lab]of COLS)h+=`<th>${lab}</th>`;
+  h+="</tr>";
+  const tot={};
+  for(const r of rows){
+    h+=`<tr><td>${playerLink(r.name)}${r.starter?" *":""}</td>`;
+    for(const[k]of COLS){h+=`<td>${v(r[k])}</td>`;if(typeof r[k]==="number")tot[k]=(tot[k]||0)+r[k]}
+    h+="</tr>";
+  }
+  h+='<tr class="tot"><td>Totals</td>';
+  for(const[k]of COLS)h+=`<td>${k==="min"?(tot[k]?Math.round(tot[k]):"—"):(k in tot?tot[k]:"—")}</td>`;
+  return h+"</tr></table>";
+}
+function playerLink(n){return `<a href="#" style="color:inherit" onclick="event.preventDefault();gotoPlayer('${esc(n).replace(/'/g,"\\'")}')">${esc(n)}</a>`}
+
+// ---------- actions ----------
+async function showDate(){
+  const d=$("dateInput").value;
+  if(!d)return status("pick a date");
+  status("loading…");$("out").innerHTML="";
+  try{
+    let found=[];
+    for(const sy of seasonCandidates(d)){
+      try{found=(await games(sy)).filter(g=>g.date===d).map(g=>({...g,sy}))}catch(e){}
+      if(found.length)break;
+    }
+    status(found.length?`${found.length} game(s) on ${d}`:`no games on ${d}`);
+    $("out").innerHTML=gameCards(found);
+  }catch(e){status("error: "+e.message)}
+}
+window.openGame=async function(sy,gid){
+  status("loading box score…");
+  try{
+    const rows=(await box(sy)).filter(r=>r.gameId===gid);
+    const g=(await games(sy)).find(x=>x.gameId===gid)||{};
+    const home=rows.filter(r=>r.homeGame===1),away=rows.filter(r=>r.homeGame!==1);
+    const hd=`<span class="bk" onclick="history.back()">&larr; back</span>
+      <div class="teamhd">${esc(g.away)} <b>${v(g.awayScore)}</b> @ ${esc(g.home)} <b>${v(g.homeScore)}</b>
+      &nbsp;<small style="color:var(--dim)">${esc(g.date)} · ${fmtSeason(sy)}</small></div>`;
+    $("out").innerHTML=hd+teamTable(g.away+" (away)",away)+teamTable(g.home+" (home)",home);
+    status(rows.length?"":"no player rows found for this game");
+    window.scrollTo({top:0,behavior:"smooth"});
+  }catch(e){status("error: "+e.message)}
+}
+async function fillTeams(){
+  const sy=+$("teamSeason").value;
+  try{
+    const gs=await games(sy),set=new Set();
+    gs.forEach(g=>{if(g.home)set.add(g.home);if(g.away)set.add(g.away)});
+    $("teamSel").innerHTML=[...set].sort().map(t=>`<option>${esc(t)}</option>`).join("");
+    status(`${set.size} teams in ${fmtSeason(sy)}`);
+  }catch(e){status("error: "+e.message)}
+}
+async function showTeam(){
+  const sy=+$("teamSeason").value,t=$("teamSel").value;
+  status("loading…");
+  try{
+    const list=(await games(sy)).filter(g=>g.home===t||g.away===t).map(g=>({...g,sy}));
+    status(`${list.length} games — ${t}, ${fmtSeason(sy)}`);
+    $("out").innerHTML=gameCards(list);
+  }catch(e){status("error: "+e.message)}
+}
+window.gotoPlayer=async function(name){
+  setTab("Player");$("playerInput").value=name;
+  await pickPlayer(name);
+}
+async function pickPlayer(name){
+  $("sugbox").style.display="none";
+  try{
+    const idx=await playerIndex();
+    const seasons=idx[name];
+    if(!seasons){status("not in index: "+name);return}
+    status(`${name}: ${seasons.length} season(s)`);
+    $("playerSeasons").innerHTML=seasons.map(sy=>`<span class="pill" onclick="playerSeason('${esc(name).replace(/'/g,"\\'")}',${sy})">${fmtSeason(sy)}</span>`).join("");
+    $("out").innerHTML="";
+  }catch(e){status("error: "+e.message)}
+}
+window.playerSeason=async function(name,sy){
+  status("loading game log…");
+  try{
+    const rows=(await box(sy)).filter(r=>r.name===name).sort((a,b)=>a.date<b.date?-1:1);
+    let h=`<div class="teamhd"><b>${esc(name)}</b> — ${fmtSeason(sy)} game log (${rows.length} games)</div><table><tr><th>Date</th><th>Tm</th><th>Opp</th>`;
+    for(const[,lab]of COLS)h+=`<th>${lab}</th>`;h+="</tr>";
+    const tot={};let n=0;
+    for(const r of rows){
+      h+=`<tr><td><a href="#" style="color:inherit" onclick="event.preventDefault();openGame(${sy},'${esc(r.gameId)}')">${esc(r.date)}</a></td><td>${esc(r.team)}</td><td>${r.homeGame?"vs":"@"} ${esc(r.opp)}</td>`;
+      for(const[k]of COLS){h+=`<td>${v(r[k])}</td>`;if(typeof r[k]==="number")tot[k]=(tot[k]||0)+r[k]}
+      h+="</tr>";n++;
+    }
+    h+='<tr class="tot"><td colspan="3">Per game</td>';
+    for(const[k]of COLS)h+=`<td>${k in tot&&n?(tot[k]/n).toFixed(1):"—"}</td>`;
+    $("out").innerHTML=h+"</tr></table>";
+    status("");
+  }catch(e){status("error: "+e.message)}
+}
+
+// ---------- player autocomplete ----------
+let sugTimer=null;
+$("playerInput").addEventListener("input",async()=>{
+  clearTimeout(sugTimer);
+  sugTimer=setTimeout(async()=>{
+    const q=$("playerInput").value.trim().toLowerCase();
+    if(q.length<2){$("sugbox").style.display="none";return}
+    await playerIndex();status("");
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)).slice(0,30);
+    $("sugbox").innerHTML=hits.map(n=>`<div onclick="window.__pick('${esc(n).replace(/'/g,"\\'")}')">${esc(n)}</div>`).join("");
+    $("sugbox").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__pick=n=>{$("playerInput").value=n;pickPlayer(n)};
+
+// ---------- tabs & init ----------
+function setTab(t){
+  activeTab=t;
+  for(const x of["Date","Team","Player"]){
+    $("tab"+x).classList.toggle("on",x===t);
+    $("pane"+x).style.display=x===t?"":"none";
+  }
+}
+$("tabDate").onclick=()=>setTab("Date");
+$("tabTeam").onclick=()=>setTab("Team");
+$("tabPlayer").onclick=()=>setTab("Player");
+$("dateGo").onclick=showDate;
+$("teamGo").onclick=showTeam;
+$("teamSeason").addEventListener("change",fillTeams);
+(function init(){
+  const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
+  $("teamSeason").innerHTML=opts.join("");
+  const y=new Date();y.setDate(y.getDate()-1);
+  $("dateInput").value=y.toISOString().slice(0,10);
+  fillTeams();
+})();
+</script>
+</body>
+</html>
