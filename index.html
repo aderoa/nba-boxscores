@@ -1,146 +1,337 @@
-#!/usr/bin/env python3
-r"""
-Build data/team_codes.json: stats.nba.com tricode -> HoopsHype code mapping,
-era-aware, plus an AUDIT of every tricode actually present in your data.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Box Score Database — Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0b1a;--panel:#14142b;--panel2:#1b1b36;--line:#2a2a4d;--tx:#e8e8f4;--dim:#8a8ab0;--gold:#ffd24d;--acc:#ff5a36;--green:#34d97a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;min-height:100vh}
+.wrap{max-width:1060px;margin:0 auto;padding:22px 16px 60px}
+h1{font-family:'Oswald',sans-serif;font-size:26px;letter-spacing:2px;text-transform:uppercase}
+h1 b{color:var(--gold)}
+.sub{color:var(--dim);margin:4px 0 18px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;background:var(--panel);color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:9px 18px;cursor:pointer}
+.tabs button.on{color:var(--gold);border-color:var(--gold)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+input,select{background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--tx);font-family:inherit;font-size:13px;padding:8px 10px}
+input:focus,select:focus{outline:none;border-color:var(--gold)}
+button.go{font-family:'Oswald',sans-serif;letter-spacing:1px;text-transform:uppercase;background:var(--gold);color:#1a1400;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer}
+.status{color:var(--dim);margin:8px 2px}
+.glist{display:flex;flex-direction:column;gap:8px}
+.gcard{display:flex;justify-content:space-between;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer}
+.gcard:hover{border-color:var(--gold)}
+.gcard .sc{font-family:'Oswald',sans-serif;font-size:16px}
+.gcard .sc b{color:var(--gold)}
+.gcard small{color:var(--dim)}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+td:first-child,th:first-child{text-align:left}
+tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
+.teamhd{font-family:'Oswald',sans-serif;font-size:17px;letter-spacing:1px;margin:18px 0 2px}
+.teamhd b{color:var(--gold)}
+.suggest{position:relative}
+.sugbox{position:absolute;top:100%;left:0;right:0;z-index:5;background:var(--panel2);border:1px solid var(--line);border-radius:8px;max-height:240px;overflow:auto;display:none}
+.sugbox div{padding:7px 10px;cursor:pointer}
+.sugbox div:hover{background:var(--line)}
+.pill{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:5px 12px;margin:3px 4px 0 0;cursor:pointer}
+.pill:hover{border-color:var(--gold)}
+.bk{color:var(--dim);cursor:pointer;margin-bottom:10px;display:inline-block}
+.bk:hover{color:var(--gold)}
+.note{color:var(--dim);font-size:11px;margin-top:10px}
+@media(max-width:700px){th,td{padding:5px 5px;font-size:11px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NBA <b>Box Score Database</b></h1>
+  <div class="sub">Every game since 1946-47 · updated daily</div>
 
-    python build_team_codes.py C:\GitHub\nba-boxscores\data
-    (or no argument to auto-detect the data folder, like build_player_index)
+  <div class="tabs">
+    <button id="tabDate" class="on">By date</button>
+    <button id="tabTeam">By team</button>
+    <button id="tabPlayer">By player</button>
+  </div>
 
-HoopsHype convention: franchises collapse to their modern code (Tri-Cities ->
-ATL, Sonics -> OKC); defunct franchises keep their own code (CHS, CLR, ...).
-Era rule needed for BAL: original BAA Bullets (<=1955) stay BAL; the 1963-73
-Baltimore Bullets belong to the Wizards franchise -> WAS.
-"""
+  <div class="panel" id="paneDate">
+    <div class="row">
+      <label>Game date</label>
+      <input type="date" id="dateInput" value="">
+      <button class="go" id="dateGo">Show games</button>
+    </div>
+  </div>
 
-import json, os, sys
+  <div class="panel" id="paneTeam" style="display:none">
+    <div class="row">
+      <label>Season</label><select id="teamSeason"></select>
+      <label>Team</label><select id="teamSel"><option>load a season…</option></select>
+      <button class="go" id="teamGo">Show games</button>
+    </div>
+  </div>
 
-# (nba_tricode, hh_code, display_name, minSy, maxSy)  — None = unbounded.
-RULES = [
-    # --- modern 30 (codes identical) ---
-    ("ATL","ATL","Atlanta Hawks",None,None), ("BOS","BOS","Boston Celtics",None,None),
-    ("BKN","BKN","Brooklyn Nets",None,None), ("CHA","CHA","Charlotte Hornets",None,None),
-    ("CHI","CHI","Chicago Bulls",None,None), ("CLE","CLE","Cleveland Cavaliers",None,None),
-    ("DAL","DAL","Dallas Mavericks",None,None), ("DEN","DEN","Denver Nuggets",None,None),
-    ("DET","DET","Detroit Pistons",None,None), ("GSW","GSW","Golden State Warriors",None,None),
-    ("HOU","HOU","Houston Rockets",None,None), ("IND","IND","Indiana Pacers",None,None),
-    ("LAC","LAC","Los Angeles Clippers",None,None), ("LAL","LAL","Los Angeles Lakers",None,None),
-    ("MEM","MEM","Memphis Grizzlies",None,None), ("MIA","MIA","Miami Heat",None,None),
-    ("MIL","MIL","Milwaukee Bucks",None,None), ("MIN","MIN","Minnesota Timberwolves",None,None),
-    ("NOP","NOP","New Orleans Pelicans",None,None), ("NYK","NYK","New York Knicks",None,None),
-    ("OKC","OKC","Oklahoma City Thunder",None,None), ("ORL","ORL","Orlando Magic",None,None),
-    ("PHI","PHI","Philadelphia Sixers",None,None), ("PHX","PHX","Phoenix Suns",None,None),
-    ("POR","POR","Portland Trail Blazers",None,None), ("SAC","SAC","Sacramento Kings",None,None),
-    ("SAS","SAS","San Antonio Spurs",None,None), ("TOR","TOR","Toronto Raptors",None,None),
-    ("UTA","UTA","Utah Jazz",None,None), ("WAS","WAS","Washington Wizards",None,None),
-    # --- relocated/renamed eras -> modern HH code ---
-    ("PHW","GSW","Philadelphia Warriors",None,None), ("SFW","GSW","San Francisco Warriors",None,None),
-    ("GOS","GSW","Golden State Warriors",None,None),
-    ("MNL","LAL","Minneapolis Lakers",None,None),
-    ("ROC","SAC","Rochester Royals",None,None), ("CIN","SAC","Cincinnati Royals",None,None),
-    ("KCO","SAC","Kansas City-Omaha Kings",None,None), ("KCK","SAC","Kansas City Kings",None,None),
-    ("FTW","DET","Fort Wayne Pistons",None,None),
-    ("SYR","PHI","Syracuse Nationals",None,None), ("PHL","PHI","Philadelphia 76ers",None,None),
-    ("TCB","ATL","Tri-Cities Blackhawks",None,None), ("TRI","ATL","Tri-Cities Blackhawks",None,None),
-    ("MLH","ATL","Milwaukee Hawks",None,None), ("STL","ATL","St. Louis Hawks",None,None),
-    ("SDR","HOU","San Diego Rockets",None,None),
-    ("SEA","OKC","Seattle SuperSonics",None,None),
-    ("BUF","LAC","Buffalo Braves",None,None), ("SDC","LAC","San Diego Clippers",None,None),
-    ("NOJ","UTA","New Orleans Jazz",None,None),
-    ("NYN","BKN","New York Nets",None,None), ("NJN","BKN","New Jersey Nets",None,None),
-    ("CHH","CHA","Charlotte Hornets",None,None),  # 1989-2002 originals
-    ("NOH","NOP","New Orleans Hornets",None,None), ("NOK","NOP","New Orleans/OKC Hornets",None,None),
-    ("VAN","MEM","Vancouver Grizzlies",None,None),
-    ("CHP","WAS","Chicago Packers",None,None), ("CHZ","WAS","Chicago Zephyrs",None,None),
-    ("CAP","WAS","Capital Bullets",None,None), ("WSB","WAS","Washington Bullets",None,None),
-    # --- era-split: BAL ---
-    ("BAL","BAL","Baltimore Bullets (BAA)",None,1955),
-    ("BAL","WAS","Baltimore Bullets",1956,None),
-    ("BLB","BAL","Baltimore Bullets (BAA)",None,None),
-    # --- defunct franchises (own HH codes) ---
-    ("AND","AND","Anderson Packers",None,None),
-    ("CHS","CHS","Chicago Stags",None,None),
-    ("CLR","CLR","Cleveland Rebels",None,None),
-    ("DNN","DNN","Denver Nuggets (1950)",None,None), ("DN" ,"DNN","Denver Nuggets (1950)",None,None),
-    ("DTF","DTF","Detroit Falcons",None,None),
-    ("INJ","INJ","Indianapolis Jets",None,None), ("JET","INJ","Indianapolis Jets",None,None),
-    ("INO","INO","Indianapolis Olympians",None,None),
-    ("PIT","PIT","Pittsburgh Ironmen",None,None),
-    ("PRO","PRO","Providence Steamrollers",None,None),
-    ("SHE","SHE","Sheboygan Red Skins",None,None),
-    ("STB","STB","St. Louis Bombers",None,None), ("BOM","STB","St. Louis Bombers",None,None),
-    ("TRH","TOH","Toronto Huskies",None,None), ("TOH","TOH","Toronto Huskies",None,None),
-    ("WSC","WSC","Washington Capitols",None,None), ("WAT","WAT","Waterloo Hawks",None,None),
-]
+  <div class="panel" id="panePlayer" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="flex:1;min-width:240px">
+        <label>Player</label><br>
+        <input type="text" id="playerInput" placeholder="start typing a name…" style="width:100%" autocomplete="off">
+        <div class="sugbox" id="sugbox"></div>
+      </div>
+    </div>
+    <div id="playerSeasons"></div>
+  </div>
 
+  <div class="status" id="status"></div>
+  <div id="out"></div>
+  <div class="note">Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
+</div>
 
-def find_data_dir():
-    if len(sys.argv) > 1:
-        d = os.path.abspath(sys.argv[1])
-        if os.path.isdir(d): return d
-        sys.exit(f"not a directory: {d}")
-    here = os.path.dirname(os.path.abspath(__file__))
-    for cand in (os.path.join(os.getcwd(), "data"),
-                 os.path.join(here, "data"),
-                 os.path.join(os.path.dirname(here), "data")):
-        if os.path.isdir(cand): return cand
-    sys.exit("couldn't find a data folder — pass it explicitly")
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
+const cache={games:{},box:{},idx:null};
+let activeTab="Date";
 
+// ---------- data loading ----------
+async function fetchNDJSON(path){
+  const r=await fetch(path,{cache:"no-cache"});
+  if(!r.ok)throw new Error(path+" -> HTTP "+r.status);
+  const t=await r.text(),out=[];
+  for(const line of t.split("\n")){const s=line.trim();if(!s)continue;try{out.push(JSON.parse(s))}catch(e){}}
+  return out;
+}
+async function games(sy){
+  if(!cache.games[sy])cache.games[sy]=await fetchNDJSON(`data/${sy}/games.ndjson`);
+  return cache.games[sy];
+}
+async function box(sy){
+  if(!cache.box[sy]){
+    status(`loading ${fmtSeason(sy)} box scores…`);
+    cache.box[sy]=await fetchNDJSON(`data/${sy}/boxscores.ndjson`);
+  }
+  return cache.box[sy];
+}
+async function playerIndex(){
+  if(!cache.idx){
+    status("loading player index…");
+    const r=await fetch("data/player_index.json",{cache:"no-cache"});
+    if(!r.ok)throw new Error("player_index.json missing — run scripts/build_player_index.py and push it");
+    cache.idx=await r.json();
+    cache.idxNames=Object.keys(cache.idx);
+  }
+  return cache.idx;
+}
+async function teamCodes(){
+  if(cache.tc===undefined){
+    try{
+      const r=await fetch("data/team_codes.json",{cache:"no-cache"});
+      cache.tc=r.ok?(await r.json()).rules:null;
+    }catch(e){cache.tc=null}
+  }
+  return cache.tc;
+}
+// stats tricode + season -> HoopsHype {code, name}; identity fallback.
+function hh(tri,sy){
+  if(!tri)return {code:tri,name:tri};
+  if(cache.tc){
+    for(const r of cache.tc){
+      if(r.nba===tri&&(r.minSy==null||sy>=r.minSy)&&(r.maxSy==null||sy<=r.maxSy))
+        return {code:r.hh,name:r.name};
+    }
+  }
+  return {code:tri,name:tri};
+}
+// game type is encoded in the gameId's 3rd character
+function gameType(gid){
+  const c=String(gid||"")[2];
+  return c==="2"?{s:"RS",l:"Regular Season",col:"var(--dim)"}
+       : c==="4"?{s:"PO",l:"Playoffs",col:"var(--gold)"}
+       : c==="5"?{s:"PI",l:"Play-In",col:"var(--green)"}
+       : c==="1"?{s:"PRE",l:"Preseason",col:"var(--dim)"}
+       : c==="3"?{s:"AS",l:"All-Star",col:"var(--dim)"}
+       : {s:"",l:"",col:"var(--dim)"};
+}
+function typeBadge(gid){
+  const t=gameType(gid);
+  return t.s?`<span style="border:1px solid ${t.col};color:${t.col};border-radius:5px;padding:1px 6px;font-size:10px;letter-spacing:1px">${t.l.toUpperCase()}</span>`:"";
+}
 
-def resolve(tri, sy):
-    for nba, hh, name, lo, hi in RULES:
-        if nba == tri and (lo is None or sy >= lo) and (hi is None or sy <= hi):
-            return hh, name
-    return None, None
+// ---------- utils ----------
+function fmtSeason(sy){return (sy-1)+"-"+String(sy).slice(-2).padStart(2,"0")}
+function status(s){$("status").textContent=s||""}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function v(x){return x==null?"—":x}
+function seasonCandidates(dateStr){
+  const [y,m]=dateStr.split("-").map(Number);
+  // Sep–Dec → season ends next year. Jan–Jun → ends this year.
+  // Jul/Aug ambiguous (2020 bubble): try same-year end first, then next.
+  if(m>=9)return [y+1];
+  if(m<=6)return [y];
+  return [y,y+1];
+}
 
+// ---------- rendering ----------
+function gameCards(list,title){
+  let h=title?`<div class="teamhd">${title}</div>`:"";
+  h+='<div class="glist">';
+  for(const g of list){
+    const A=hh(g.away,g.sy),H=hh(g.home,g.sy);
+    h+=`<div class="gcard" onclick="openGame(${g.sy},'${esc(g.gameId)}')">
+      <span class="sc" title="${esc(A.name)} at ${esc(H.name)}">${esc(A.code)} <b>${v(g.awayScore)}</b> @ ${esc(H.code)} <b>${v(g.homeScore)}</b></span>
+      <small>${typeBadge(g.gameId)} ${esc(g.date)} · ${fmtSeason(g.sy)}</small></div>`;
+  }
+  return h+"</div>";
+}
+const COLS=[["min","MIN"],["pts","PTS"],["fgm","FGM"],["fga","FGA"],["tpm","3PM"],["tpa","3PA"],["ftm","FTM"],["fta","FTA"],["oreb","ORB"],["dreb","DRB"],["reb","REB"],["ast","AST"],["stl","STL"],["blk","BLK"],["tov","TOV"],["pf","PF"],["pm","+/-"]];
+function teamTable(name,rows){
+  rows=rows.slice().sort((a,b)=>(b.min||0)-(a.min||0)||(b.pts||0)-(a.pts||0));
+  let h=`<div class="teamhd"><b>${esc(name)}</b></div><table><tr><th>Player</th>`;
+  for(const[,lab]of COLS)h+=`<th>${lab}</th>`;
+  h+="</tr>";
+  const tot={};
+  for(const r of rows){
+    h+=`<tr><td>${playerLink(r.name)}${r.starter?" *":""}</td>`;
+    for(const[k]of COLS){h+=`<td>${v(r[k])}</td>`;if(typeof r[k]==="number")tot[k]=(tot[k]||0)+r[k]}
+    h+="</tr>";
+  }
+  h+='<tr class="tot"><td>Totals</td>';
+  for(const[k]of COLS)h+=`<td>${k==="min"?(tot[k]?Math.round(tot[k]):"—"):(k in tot?tot[k]:"—")}</td>`;
+  return h+"</tr></table>";
+}
+function playerLink(n){return `<a href="#" style="color:inherit" onclick="event.preventDefault();gotoPlayer('${esc(n).replace(/'/g,"\\'")}')">${esc(n)}</a>`}
 
-def main():
-    data_dir = find_data_dir()
-    out = os.path.join(data_dir, "team_codes.json")
+// ---------- actions ----------
+async function showDate(){
+  const d=$("dateInput").value;
+  if(!d)return status("pick a date");
+  status("loading…");$("out").innerHTML="";
+  try{
+    await teamCodes();
+    let found=[];
+    for(const sy of seasonCandidates(d)){
+      try{found=(await games(sy)).filter(g=>g.date===d).map(g=>({...g,sy}))}catch(e){}
+      if(found.length)break;
+    }
+    status(found.length?`${found.length} game(s) on ${d}`:`no games on ${d}`);
+    $("out").innerHTML=gameCards(found);
+  }catch(e){status("error: "+e.message)}
+}
+window.openGame=async function(sy,gid){
+  status("loading box score…");
+  try{
+    await teamCodes();
+    const rows=(await box(sy)).filter(r=>r.gameId===gid);
+    const g=(await games(sy)).find(x=>x.gameId===gid)||{};
+    const home=rows.filter(r=>r.homeGame===1),away=rows.filter(r=>r.homeGame!==1);
+    const A=hh(g.away,sy),H=hh(g.home,sy);
+    const hd=`<span class="bk" onclick="history.back()">&larr; back</span>
+      <div class="teamhd">${esc(A.code)} <b>${v(g.awayScore)}</b> @ ${esc(H.code)} <b>${v(g.homeScore)}</b>
+      &nbsp;${typeBadge(gid)}&nbsp;<small style="color:var(--dim)">${esc(g.date)} · ${fmtSeason(sy)}</small></div>`;
+    $("out").innerHTML=hd+teamTable(A.name+" ("+A.code+", away)",away)+teamTable(H.name+" ("+H.code+", home)",home);
+    status(rows.length?"":"no player rows found for this game");
+    window.scrollTo({top:0,behavior:"smooth"});
+  }catch(e){status("error: "+e.message)}
+}
+async function fillTeams(){
+  const sy=+$("teamSeason").value;
+  try{
+    await teamCodes();
+    const gs=await games(sy),set=new Set();
+    gs.forEach(g=>{if(g.home)set.add(g.home);if(g.away)set.add(g.away)});
+    const opts=[...set].map(t=>{const m=hh(t,sy);return {t,lab:m.code+" — "+m.name}})
+      .sort((a,b)=>a.lab<b.lab?-1:1);
+    $("teamSel").innerHTML=opts.map(o=>`<option value="${esc(o.t)}">${esc(o.lab)}</option>`).join("");
+    status(`${set.size} teams in ${fmtSeason(sy)}`);
+  }catch(e){status("error: "+e.message)}
+}
+async function showTeam(){
+  const sy=+$("teamSeason").value,t=$("teamSel").value;
+  status("loading…");
+  try{
+    const m=hh(t,sy);
+    const list=(await games(sy)).filter(g=>g.home===t||g.away===t).map(g=>({...g,sy}));
+    status(`${list.length} games — ${m.name} (${m.code}), ${fmtSeason(sy)}`);
+    $("out").innerHTML=gameCards(list);
+  }catch(e){status("error: "+e.message)}
+}
+window.gotoPlayer=async function(name){
+  setTab("Player");$("playerInput").value=name;
+  await pickPlayer(name);
+}
+async function pickPlayer(name){
+  $("sugbox").style.display="none";
+  try{
+    const idx=await playerIndex();
+    const seasons=idx[name];
+    if(!seasons){status("not in index: "+name);return}
+    status(`${name}: ${seasons.length} season(s)`);
+    $("playerSeasons").innerHTML=seasons.map(sy=>`<span class="pill" onclick="playerSeason('${esc(name).replace(/'/g,"\\'")}',${sy})">${fmtSeason(sy)}</span>`).join("");
+    $("out").innerHTML="";
+  }catch(e){status("error: "+e.message)}
+}
+window.playerSeason=async function(name,sy){
+  status("loading game log…");
+  try{
+    await teamCodes();
+    const rows=(await box(sy)).filter(r=>r.name===name).sort((a,b)=>a.date<b.date?-1:1);
+    let h=`<div class="teamhd"><b>${esc(name)}</b> — ${fmtSeason(sy)} game log (${rows.length} games)</div><table><tr><th>Date</th><th>Type</th><th>Tm</th><th>Opp</th>`;
+    for(const[,lab]of COLS)h+=`<th>${lab}</th>`;h+="</tr>";
+    const tot={};let n=0;
+    for(const r of rows){
+      const t=gameType(r.gameId);
+      h+=`<tr><td><a href="#" style="color:inherit" onclick="event.preventDefault();openGame(${sy},'${esc(r.gameId)}')">${esc(r.date)}</a></td><td style="color:${t.col}">${t.s}</td><td>${esc(hh(r.team,sy).code)}</td><td>${r.homeGame?"vs":"@"} ${esc(hh(r.opp,sy).code)}</td>`;
+      for(const[k]of COLS){h+=`<td>${v(r[k])}</td>`;if(typeof r[k]==="number")tot[k]=(tot[k]||0)+r[k]}
+      h+="</tr>";n++;
+    }
+    h+='<tr class="tot"><td colspan="4">Per game</td>';
+    for(const[k]of COLS)h+=`<td>${k in tot&&n?(tot[k]/n).toFixed(1):"—"}</td>`;
+    $("out").innerHTML=h+"</tr></table>";
+    status("");
+  }catch(e){status("error: "+e.message)}
+}
 
-    # AUDIT: every tricode actually present, with season range
-    seen = {}   # tri -> [minSy, maxSy, count]
-    for s in sorted(d for d in os.listdir(data_dir)
-                    if d.isdigit() and os.path.isdir(os.path.join(data_dir, d))):
-        p = os.path.join(data_dir, s, "games.ndjson")
-        if not os.path.exists(p): continue
-        sy = int(s)
-        with open(p, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line: continue
-                try: g = json.loads(line)
-                except Exception: continue
-                for tri in (g.get("home"), g.get("away")):
-                    if not tri: continue
-                    v = seen.setdefault(tri, [sy, sy, 0])
-                    v[0] = min(v[0], sy); v[1] = max(v[1], sy); v[2] += 1
+// ---------- player autocomplete ----------
+let sugTimer=null;
+$("playerInput").addEventListener("input",async()=>{
+  clearTimeout(sugTimer);
+  sugTimer=setTimeout(async()=>{
+    const q=$("playerInput").value.trim().toLowerCase();
+    if(q.length<2){$("sugbox").style.display="none";return}
+    await playerIndex();status("");
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)).slice(0,30);
+    $("sugbox").innerHTML=hits.map(n=>`<div onclick="window.__pick('${esc(n).replace(/'/g,"\\'")}')">${esc(n)}</div>`).join("");
+    $("sugbox").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__pick=n=>{$("playerInput").value=n;pickPlayer(n)};
 
-    unmapped = []
-    print(f"{len(seen)} distinct tricodes in data:")
-    for tri in sorted(seen):
-        lo, hi, n = seen[tri]
-        hh_lo, name_lo = resolve(tri, lo)
-        hh_hi, name_hi = resolve(tri, hi)
-        if hh_lo is None or hh_hi is None:
-            unmapped.append(tri)
-            print(f"  {tri:4s} {lo}-{hi} ({n} game-sides)  -> *** UNMAPPED ***")
-        elif hh_lo != hh_hi:
-            print(f"  {tri:4s} {lo}-{hi} ({n})  -> {hh_lo} (early) / {hh_hi} (late)  [era split]")
-        else:
-            print(f"  {tri:4s} {lo}-{hi} ({n})  -> {hh_lo}  {name_lo}")
-
-    rules_json = [{"nba": n, "hh": h, "name": nm,
-                   **({"minSy": lo} if lo else {}), **({"maxSy": hi} if hi else {})}
-                  for n, h, nm, lo, hi in RULES]
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump({"rules": rules_json}, f, separators=(",", ":"), ensure_ascii=False)
-    print(f"\nwrote {out} ({len(rules_json)} rules)")
-    if unmapped:
-        print("\n*** UNMAPPED CODES — paste this list back so the mapping can be extended: ***")
-        print("   ", ", ".join(unmapped))
-    else:
-        print("all tricodes in the data are covered.")
-
-
-if __name__ == "__main__":
-    main()
+// ---------- tabs & init ----------
+function setTab(t){
+  activeTab=t;
+  for(const x of["Date","Team","Player"]){
+    $("tab"+x).classList.toggle("on",x===t);
+    $("pane"+x).style.display=x===t?"":"none";
+  }
+}
+$("tabDate").onclick=()=>setTab("Date");
+$("tabTeam").onclick=()=>setTab("Team");
+$("tabPlayer").onclick=()=>setTab("Player");
+$("dateGo").onclick=showDate;
+$("teamGo").onclick=showTeam;
+$("teamSeason").addEventListener("change",fillTeams);
+(function init(){
+  const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
+  $("teamSeason").innerHTML=opts.join("");
+  const y=new Date();y.setDate(y.getDate()-1);
+  $("dateInput").value=y.toISOString().slice(0,10);
+  fillTeams();
+})();
+</script>
+</body>
+</html>
