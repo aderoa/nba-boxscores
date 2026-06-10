@@ -88,11 +88,13 @@ tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
 
   <div class="status" id="status"></div>
   <div id="out"></div>
-  <div class="note">Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
+  <div class="note"><span id="buildStamp" style="color:var(--gold)"></span><br>Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
 </div>
 
 <script>
 "use strict";
+const EXPLORER_BUILD="v3 · full team names + HH nomenclature · 2026-06-10";
+console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
 const cache={games:{},box:{},idx:null};
@@ -189,7 +191,7 @@ function gameCards(list,title){
   for(const g of list){
     const A=hh(g.away,g.sy),H=hh(g.home,g.sy);
     h+=`<div class="gcard" onclick="openGame(${g.sy},'${esc(g.gameId)}')">
-      <span class="sc" title="${esc(A.name)} at ${esc(H.name)}">${esc(A.code)} <b>${v(g.awayScore)}</b> @ ${esc(H.code)} <b>${v(g.homeScore)}</b></span>
+      <span class="sc" title="${esc(A.code)} at ${esc(H.code)}">${esc(A.name)} <b>${v(g.awayScore)}</b> @ ${esc(H.name)} <b>${v(g.homeScore)}</b></span>
       <small>${typeBadge(g.gameId)} ${esc(g.date)} · ${fmtSeason(g.sy)}</small></div>`;
   }
   return h+"</div>";
@@ -237,7 +239,7 @@ window.openGame=async function(sy,gid){
     const home=rows.filter(r=>r.homeGame===1),away=rows.filter(r=>r.homeGame!==1);
     const A=hh(g.away,sy),H=hh(g.home,sy);
     const hd=`<span class="bk" onclick="history.back()">&larr; back</span>
-      <div class="teamhd">${esc(A.code)} <b>${v(g.awayScore)}</b> @ ${esc(H.code)} <b>${v(g.homeScore)}</b>
+      <div class="teamhd">${esc(A.name)} <b>${v(g.awayScore)}</b> @ ${esc(H.name)} <b>${v(g.homeScore)}</b>
       &nbsp;${typeBadge(gid)}&nbsp;<small style="color:var(--dim)">${esc(g.date)} · ${fmtSeason(sy)}</small></div>`;
     $("out").innerHTML=hd+teamTable(A.name+" ("+A.code+", away)",away)+teamTable(H.name+" ("+H.code+", home)",home);
     status(rows.length?"":"no player rows found for this game");
@@ -291,7 +293,7 @@ window.playerSeason=async function(name,sy){
     const tot={};let n=0;
     for(const r of rows){
       const t=gameType(r.gameId);
-      h+=`<tr><td><a href="#" style="color:inherit" onclick="event.preventDefault();openGame(${sy},'${esc(r.gameId)}')">${esc(r.date)}</a></td><td style="color:${t.col}">${t.s}</td><td>${esc(hh(r.team,sy).code)}</td><td>${r.homeGame?"vs":"@"} ${esc(hh(r.opp,sy).code)}</td>`;
+      h+=`<tr><td><a href="#" style="color:inherit" onclick="event.preventDefault();openGame(${sy},'${esc(r.gameId)}')">${esc(r.date)}</a></td><td style="color:${t.col}">${t.s}</td><td title="${esc(hh(r.team,sy).code)}">${esc(hh(r.team,sy).name)}</td><td>${r.homeGame?"vs":"@"} ${esc(hh(r.opp,sy).name)}</td>`;
       for(const[k]of COLS){h+=`<td>${v(r[k])}</td>`;if(typeof r[k]==="number")tot[k]=(tot[k]||0)+r[k]}
       h+="</tr>";n++;
     }
@@ -332,6 +334,7 @@ $("dateGo").onclick=showDate;
 $("teamGo").onclick=showTeam;
 $("teamSeason").addEventListener("change",fillTeams);
 (function init(){
+  $("buildStamp").textContent="build "+EXPLORER_BUILD;
   const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
   $("teamSeason").innerHTML=opts.join("");
   const y=new Date();y.setDate(y.getDate()-1);
