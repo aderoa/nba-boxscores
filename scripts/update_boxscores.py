@@ -277,11 +277,35 @@ def main():
             log(f"  FAIL {gid} ({d}): {e}")
 
     # append per season
+    new_name_seasons = set()
     for sy, sf in season_cache.items():
         if sf["new_games"]:
             append_ndjson(sf["gpath"], sorted(sf["new_games"], key=lambda r: (r["date"], r["gameId"])))
             append_ndjson(sf["bpath"], sorted(sf["new_rows"], key=lambda r: (r["date"], r["gameId"], r["team"])))
+            for r in sf["new_rows"]:
+                if r.get("name"):
+                    new_name_seasons.add((r["name"], sy))
             log(f"season {sy}: +{len(sf['new_games'])} games, +{len(sf['new_rows'])} player rows")
+
+    # keep data/player_index.json fresh (explorer's all-time player lookup)
+    if new_name_seasons:
+        ipath = os.path.join(DATA_DIR, "player_index.json")
+        try:
+            index = {}
+            if os.path.exists(ipath):
+                with open(ipath, "r", encoding="utf-8") as f:
+                    index = json.load(f)
+            changed = False
+            for name, sy in new_name_seasons:
+                seasons = index.setdefault(name, [])
+                if sy not in seasons:
+                    seasons.append(sy); seasons.sort(); changed = True
+            if changed:
+                with open(ipath, "w", encoding="utf-8") as f:
+                    json.dump(index, f, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+                log("player_index.json updated")
+        except Exception as e:
+            log(f"WARN: player index update failed ({e}) — rebuild with build_player_index.py")
 
     # advance state only through the last date with NO failures, so a flaky
     # day gets retried tomorrow instead of being skipped forever
