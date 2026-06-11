@@ -1,0 +1,32 @@
+name: Data quality check
+
+on:
+  schedule:
+    - cron: "30 11 * * *"   # daily, ~90 min after the box score update
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: quality-check
+  cancel-in-progress: false
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run checks
+        run: python scripts/data_quality.py
+      - name: Commit report
+        run: |
+          git config user.name "quality-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/quality_report.json
+          if git diff --cached --quiet; then echo "No change."; else
+            git commit -m "Quality report $(date -u +%F)"; git push; fi
