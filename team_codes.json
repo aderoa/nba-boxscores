@@ -1,0 +1,41 @@
+{
+  "simple": {
+    "BOM": "BAL",
+    "CHH": "CHA",
+    "CIN": "SAC",
+    "DN": "DEN",
+    "FTW": "DET",
+    "GOS": "GSW",
+    "KCK": "SAC",
+    "MIH": "ATL",
+    "MNL": "LAL",
+    "NJN": "BKN",
+    "NOH": "NOP",
+    "PHL": "PHI",
+    "PHW": "GSW",
+    "ROC": "SAC",
+    "SAN": "SAS",
+    "SDC": "LAC",
+    "SDR": "HOU",
+    "SEA": "OKC",
+    "SFW": "GSW",
+    "STL": "ATL",
+    "SYR": "PHI",
+    "TCB": "ATL",
+    "UTH": "UTA",
+    "VAN": "MEM"
+  },
+  "era": {
+    "BLT": [
+      {
+        "maxYear": 1955,
+        "code": "BAL"
+      },
+      {
+        "minYear": 1963,
+        "code": "WAS"
+      }
+    ]
+  },
+  "_note": "NBA.com tricode -> HoopsHype tricode. Codes absent here are identical in both. Era rules use season END year; pick the matching range."
+}
