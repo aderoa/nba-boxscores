@@ -133,7 +133,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v7b · full franchise names (+PHL/SAN) + unmapped-code diagnostic · 2026-07-02";
+const EXPLORER_BUILD="v7c · +MIH/TCB (Hawks), DEF (Detroit Falcons) · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -201,7 +201,7 @@ function hh(tri,sy){
 // Kings). Runs on top of hh(); edit this table to adjust groupings.
 const FRANCHISE_DEFS=[
   // current 30 franchises (with relocation / rename history)
-  ["ATL","Atlanta Hawks",["TRI","MLH","STL","ATL"],["Tri-Cities Blackhawks","Milwaukee Hawks","St. Louis Hawks"]],
+  ["ATL","Atlanta Hawks",["TRI","TCB","MLH","MIH","STL","ATL"],["Tri-Cities Blackhawks","Milwaukee Hawks","St. Louis Hawks"]],
   ["BOS","Boston Celtics",["BOS"],[]],
   ["BKN","Brooklyn Nets",["NJA","NYN","NJN","BRK","BKN"],["New Jersey Americans","New York Nets","New Jersey Nets"]],
   ["CHA","Charlotte Hornets",["CHH","CHA","CHO"],["Charlotte Bobcats"]],
@@ -237,7 +237,7 @@ const FRANCHISE_DEFS=[
   ["BOM","St. Louis Bombers",["BOM"],[]],
   ["CHS","Chicago Stags",["CHS"],[]],
   ["CLR","Cleveland Rebels",["CLR"],[]],
-  ["DTF","Detroit Falcons",["DTF"],[]],
+  ["DTF","Detroit Falcons",["DTF","DEF"],[]],
   ["DNN","Denver Nuggets (1949-50)",["DN","DNN"],[]],
   ["HUS","Toronto Huskies",["HUS"],[]],
   ["INJ","Indianapolis Jets",["JET","INJ"],[]],
