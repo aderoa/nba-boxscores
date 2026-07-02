@@ -48,11 +48,17 @@ tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
 @media(max-width:700px){th,td{padding:5px 5px;font-size:11px}}
 table.wl{border-collapse:collapse;width:100%;font-size:12px}
 table.wl th,table.wl td{padding:5px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
-table.wl th{color:var(--dim);text-transform:uppercase;letter-spacing:1px;font-size:10px;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--panel)}
+table.wl th{color:var(--dim);text-transform:uppercase;letter-spacing:1px;font-size:10px;cursor:pointer;user-select:none}
 table.wl th:hover{color:var(--gold)}
-table.wl td.n{font-family:'Oswald',sans-serif}
+table.wl tbody tr{cursor:pointer}
 table.wl tbody tr:hover{background:var(--panel2)}
-.wl .sep{border-left:1px solid var(--line)}
+table.wl tr.sel{background:rgba(255,210,77,.12)}
+table.wl td.n{font-family:'Oswald',sans-serif}
+.wlcards{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 14px}
+.wlcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 18px;min-width:150px}
+.wlcard .lab{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+.wlcard .big{font-family:'Oswald',sans-serif;font-size:26px;letter-spacing:1px;margin-top:2px}
+.wlcard .pct{color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:13px}
 </style>
 </head>
 <body>
@@ -64,7 +70,7 @@ table.wl tbody tr:hover{background:var(--panel2)}
     <button id="tabDate" class="on">By date</button>
     <button id="tabTeam">By team</button>
     <button id="tabPlayer">By player</button>
-    <button id="tabWL">W / L</button>
+    <button id="tabWL">Player W / L</button>
   </div>
 
   <div class="panel" id="paneDate">
@@ -95,12 +101,16 @@ table.wl tbody tr:hover{background:var(--panel2)}
   </div>
 
   <div class="panel" id="paneWL" style="display:none">
-    <div class="row">
-      <label>From</label><select id="wlFrom"></select>
-      <label>To</label><select id="wlTo"></select>
-      <button class="go" id="wlGo">Build W/L table</button>
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="flex:1;min-width:240px">
+        <label>Player</label><br>
+        <input type="text" id="wlPlayer" placeholder="start typing a name…" style="width:100%" autocomplete="off">
+        <div class="sugbox" id="wlSug"></div>
+      </div>
+      <div><label>Team</label><br><select id="wlTeam"><option value="">All teams</option></select></div>
+      <button class="go" id="wlCopy">🔗 Link</button>
     </div>
-    <div class="sub" style="margin:8px 2px 0">Team win/loss records — Regular Season, Playoffs, and combined, with win %. Franchises are tracked across relocations; Preseason, All-Star and Play-In games are excluded. Click any column to sort. All-time loads many seasons on first build.</div>
+    <div class="sub" style="margin:8px 2px 0">A player's win/loss record — Regular Season, Playoffs and combined, with win %. Filter by team to see their record with each franchise. Click a column to sort; the address bar becomes a shareable link.</div>
   </div>
 
   <div class="status" id="status"></div>
@@ -110,7 +120,7 @@ table.wl tbody tr:hover{background:var(--panel2)}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v4 · + W/L database (RS/PO/combined, win%, per team) · 2026-07-02";
+const EXPLORER_BUILD="v4 · player W/L (RS/PO/combined, win%, per-team filter, deep link) · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -336,63 +346,82 @@ $("playerInput").addEventListener("input",async()=>{
 });
 window.__pick=n=>{$("playerInput").value=n;pickPlayer(n)};
 
-// ---------- W / L database ----------
-let wlData=null, wlSort={key:"tot_pct",dir:-1};
+// ---------- player W / L ----------
+let wlName=null, wlAcc=null, wlSort={key:"tot_g",dir:-1}, wlSugTimer=null;
+const gcount=e=>e.rs.w+e.rs.l+e.po.w+e.po.l;
 function fmtPct(w,l){const g=w+l;return g?(w/g).toFixed(3).replace(/^0(?=\.)/,''):"\u2014";}
-const WLCOLS=[
-  {k:"name",  h:"Team",   al:"left",  d:r=>esc(r.name), cls:"n"},
-  {k:"rs_w",  h:"RS W",   al:"right", d:r=>r.rs_w},
-  {k:"rs_l",  h:"RS L",   al:"right", d:r=>r.rs_l},
-  {k:"rs_pct",h:"RS %",   al:"right", d:r=>fmtPct(r.rs_w,r.rs_l)},
-  {k:"po_w",  h:"PO W",   al:"right", d:r=>r.po_w, sep:true},
-  {k:"po_l",  h:"PO L",   al:"right", d:r=>r.po_l},
-  {k:"po_pct",h:"PO %",   al:"right", d:r=>fmtPct(r.po_w,r.po_l)},
-  {k:"tot_w", h:"W",      al:"right", d:r=>r.tot_w, sep:true},
-  {k:"tot_l", h:"L",      al:"right", d:r=>r.tot_l},
-  {k:"tot_pct",h:"Win %", al:"right", d:r=>fmtPct(r.tot_w,r.tot_l)},
-];
-async function buildWL(){
-  const a=+$("wlFrom").value, b=+$("wlTo").value, lo=Math.min(a,b), hi=Math.max(a,b);
+function pnum(w,l){return (w+l)?w/(w+l):-1;}
+
+async function buildPlayerWL(name){
+  const idx=await playerIndex(); const seasons=idx[name]; if(!seasons)return null;
+  await teamCodes();
   const acc={};
-  const ent=m=>{ if(!acc[m.code]) acc[m.code]={code:m.code,name:m.name,rs:{w:0,l:0},po:{w:0,l:0}}; acc[m.code].name=m.name; return acc[m.code]; };
-  let loaded=0, skipped=0;
-  $("wlGo").disabled=true;
-  for(let sy=lo; sy<=hi; sy++){
-    status(`W/L: loading ${fmtSeason(sy)}\u2026 (${loaded} seasons)`);
-    let gs; try{ gs=await games(sy); }catch(e){ skipped++; continue; }
-    loaded++;
-    for(const g of gs){
-      if(g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore) continue;
-      const c=gameType(g.gameId).s, cat=c==="RS"?"rs":c==="PO"?"po":null;
-      if(!cat) continue;
-      const he=ent(hh(g.home,sy)), ae=ent(hh(g.away,sy));
-      if(g.homeScore>g.awayScore){ he[cat].w++; ae[cat].l++; } else { ae[cat].w++; he[cat].l++; }
+  const ent=m=>{if(!acc[m.code])acc[m.code]={code:m.code,name:m.name,rs:{w:0,l:0},po:{w:0,l:0}};acc[m.code].name=m.name;return acc[m.code];};
+  for(const sy of seasons){
+    status(`W/L: ${disp(name)} \u2014 ${fmtSeason(sy)}\u2026`);
+    let bx,gs; try{ bx=await box(sy); gs=await games(sy); }catch(e){ continue; }
+    const gid={}; for(const g of gs) gid[g.gameId]=g;
+    for(const r of bx){
+      if(r.name!==name) continue;
+      const g=gid[r.gameId]; if(!g||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore) continue;
+      const c=gameType(r.gameId).s, cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat) continue;
+      const won = r.homeGame ? (g.homeScore>g.awayScore) : (g.awayScore>g.homeScore);
+      const e=ent(hh(r.team,sy)); if(won)e[cat].w++; else e[cat].l++;
     }
   }
-  $("wlGo").disabled=false;
-  wlData=Object.values(acc).map(e=>({
-    name:e.name, code:e.code,
-    rs_w:e.rs.w, rs_l:e.rs.l, rs_pct:(e.rs.w+e.rs.l)?e.rs.w/(e.rs.w+e.rs.l):-1,
-    po_w:e.po.w, po_l:e.po.l, po_pct:(e.po.w+e.po.l)?e.po.w/(e.po.w+e.po.l):-1,
-    tot_w:e.rs.w+e.po.w, tot_l:e.rs.l+e.po.l,
-    tot_pct:(e.rs.w+e.po.w+e.rs.l+e.po.l)?(e.rs.w+e.po.w)/(e.rs.w+e.po.w+e.rs.l+e.po.l):-1
-  }));
-  status(`W/L: ${wlData.length} franchises \u00b7 ${loaded} season(s) loaded${skipped?` \u00b7 ${skipped} with no data`:""}`);
-  renderWL();
+  return acc;
 }
-function wlSortBy(k){ if(wlSort.key===k) wlSort.dir*=-1; else wlSort={key:k,dir:k==="name"?1:-1}; renderWL(); }
-function renderWL(){
-  if(!wlData){ $("out").innerHTML=""; return; }
+async function loadPlayerWL(name, teamCode){
+  wlName=name; status("computing W/L\u2026");
+  try{ wlAcc=await buildPlayerWL(name); }catch(e){ status("error: "+e.message); return; }
+  if(!wlAcc){ status("not in index: "+esc(name)); $("out").innerHTML=""; return; }
+  const teams=Object.values(wlAcc).sort((a,b)=>gcount(b)-gcount(a));
+  $("wlTeam").innerHTML='<option value="">All teams</option>'+teams.map(t=>`<option value="${esc(t.code)}">${esc(t.name)}</option>`).join("");
+  $("wlTeam").value=(teamCode && teams.some(t=>t.code===teamCode))?teamCode:"";
+  $("wlPlayer").value=disp(name);
+  status(""); syncWlHash(); renderPlayerWL();
+}
+function syncWlHash(){ if(!wlName)return; const t=$("wlTeam").value; const nh="wl="+encodeURIComponent(wlName)+(t?"&team="+encodeURIComponent(t):""); if(location.hash.replace(/^#/,"")!==nh) location.hash=nh; }
+function renderPlayerWL(){
+  if(!wlAcc){$("out").innerHTML="";return;}
+  const filt=$("wlTeam").value, all=Object.values(wlAcc);
+  const shown=filt?all.filter(t=>t.code===filt):all;
+  let rw=0,rl=0,pw=0,pl=0; for(const t of shown){rw+=t.rs.w;rl+=t.rs.l;pw+=t.po.w;pl+=t.po.l;}
+  const tw=rw+pw, tl=rl+pl, who=filt?(wlAcc[filt]?wlAcc[filt].name:filt):"All teams";
+  const card=(lab,w,l)=>`<div class="wlcard"><div class="lab">${lab}</div><div class="big">${w}\u2013${l}</div><div class="pct">${fmtPct(w,l)}</div></div>`;
+  const head=`<div class="teamhd"><b>${esc(disp(wlName))}</b> \u2014 W/L (${esc(who)})</div>`;
+  const cards=`<div class="wlcards">${card("Regular Season",rw,rl)}${card("Playoffs",pw,pl)}${card("Combined",tw,tl)}</div>`;
+  const rows=all.map(t=>({name:t.name,code:t.code,rs_w:t.rs.w,rs_l:t.rs.l,rs_pct:pnum(t.rs.w,t.rs.l),po_w:t.po.w,po_l:t.po.l,po_pct:pnum(t.po.w,t.po.l),tot_w:t.rs.w+t.po.w,tot_l:t.rs.l+t.po.l,tot_pct:pnum(t.rs.w+t.po.w,t.rs.l+t.po.l),tot_g:gcount(t)}));
   const {key,dir}=wlSort;
-  const rows=wlData.slice().sort((x,y)=>{
-    const av=x[key], bv=y[key];
-    if(typeof av==="string") return dir*av.localeCompare(bv);
-    return dir*(av-bv) || x.name.localeCompare(y.name);
-  });
-  const head=WLCOLS.map(c=>`<th class="${c.sep?'sep':''}" style="text-align:${c.al}" onclick="wlSortBy('${c.k}')">${c.h}${key===c.k?(dir<0?" \u25be":" \u25b4"):""}</th>`).join("");
-  const body=rows.map(r=>"<tr>"+WLCOLS.map(c=>`<td class="${c.cls||''} ${c.sep?'sep':''}" style="text-align:${c.al}">${c.d(r)}</td>`).join("")+"</tr>").join("");
-  $("out").innerHTML=`<div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  rows.sort((x,y)=>{const av=x[key],bv=y[key];if(typeof av==="string")return dir*av.localeCompare(bv);return dir*(av-bv)||x.name.localeCompare(y.name);});
+  const COLS=[["name","Team","left"],["rs_w","RS W","right"],["rs_l","RS L","right"],["rs_pct","RS %","right"],["po_w","PO W","right"],["po_l","PO L","right"],["po_pct","PO %","right"],["tot_w","W","right"],["tot_l","L","right"],["tot_pct","Win %","right"]];
+  const th=COLS.map(c=>`<th style="text-align:${c[2]}" onclick="wlSortBy('${c[0]}')">${c[1]}${key===c[0]?(dir<0?" \u25be":" \u25b4"):""}</th>`).join("");
+  const cell=(r,k)=>{ if(k==="name")return esc(r.name); if(k.endsWith("_pct")){const p=k.replace("_pct","");return fmtPct(r[p+"_w"],r[p+"_l"]);} return r[k]; };
+  const tb=rows.map(r=>`<tr onclick="wlSetTeam('${esc(r.code)}')" class="${r.code===filt?'sel':''}">`+COLS.map(c=>`<td class="${c[0]==='name'?'n':''}" style="text-align:${c[2]}">${cell(r,c[0])}</td>`).join("")+"</tr>").join("");
+  $("out").innerHTML=head+cards+`<div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`;
 }
+function wlSortBy(k){ if(wlSort.key===k)wlSort.dir*=-1; else wlSort={key:k,dir:k==="name"?1:-1}; renderPlayerWL(); }
+window.wlSetTeam=code=>{ $("wlTeam").value=($("wlTeam").value===code?"":code); syncWlHash(); renderPlayerWL(); };
+$("wlPlayer").addEventListener("input",()=>{
+  clearTimeout(wlSugTimer);
+  wlSugTimer=setTimeout(async()=>{
+    const q=$("wlPlayer").value.trim().toLowerCase();
+    if(q.length<2){$("wlSug").style.display="none";return;}
+    await playerIndex();
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)||disp(n).toLowerCase().includes(q)).slice(0,30);
+    $("wlSug").innerHTML=hits.map(n=>{const d=disp(n);return `<div onclick="window.__wlpick('${esc(n).replace(/'/g,"\\'")}')">${esc(d)}${d!==n?` <small style="color:var(--dim)">(${esc(n)})</small>`:""}</div>`;}).join("");
+    $("wlSug").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__wlpick=n=>{ $("wlSug").style.display="none"; loadPlayerWL(n,""); };
+function parseWlHash(){ const p=new URLSearchParams(location.hash.replace(/^#/,"")); return p.has("wl")?{name:p.get("wl"),team:p.get("team")||""}:null; }
+async function onWlHash(){
+  const q=parseWlHash(); if(!q)return;
+  setTab("WL");
+  if(q.name===wlName){ if(q.team!==$("wlTeam").value){ $("wlTeam").value=q.team; renderPlayerWL(); } return; }
+  await loadPlayerWL(q.name,q.team);
+}
+window.addEventListener("hashchange",onWlHash);
 
 // ---------- tabs & init ----------
 function setTab(t){
@@ -406,7 +435,8 @@ $("tabDate").onclick=()=>setTab("Date");
 $("tabTeam").onclick=()=>setTab("Team");
 $("tabPlayer").onclick=()=>setTab("Player");
 $("tabWL").onclick=()=>setTab("WL");
-$("wlGo").onclick=buildWL;
+$("wlTeam").addEventListener("change",()=>{syncWlHash();renderPlayerWL();});
+$("wlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
 $("dateGo").onclick=showDate;
 $("teamGo").onclick=showTeam;
 $("teamSeason").addEventListener("change",fillTeams);
@@ -414,11 +444,10 @@ $("teamSeason").addEventListener("change",fillTeams);
   $("buildStamp").textContent="build "+EXPLORER_BUILD;
   const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
   $("teamSeason").innerHTML=opts.join("");
-  $("wlFrom").innerHTML=opts.join("");$("wlTo").innerHTML=opts.join("");
-  $("wlFrom").value=FIRST_SY;$("wlTo").value=LAST_SY;
   const y=new Date();y.setDate(y.getDate()-1);
   $("dateInput").value=y.toISOString().slice(0,10);
   fillTeams();
+  onWlHash();
 })();
 </script>
 </body>
