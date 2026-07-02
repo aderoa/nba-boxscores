@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NBA Box Score Database —  W/L Explorer</title>
+<title>NBA Box Score Database — Explorer</title>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0b0b1a;--panel:#14142b;--panel2:#1b1b36;--line:#2a2a4d;--tx:#e8e8f4;--dim:#8a8ab0;--gold:#ffd24d;--acc:#ff5a36;--green:#34d97a}
@@ -133,7 +133,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v5 · player W/L + all-player leaderboard (sortable, min-games, team filter, top/bottom) · 2026-07-02";
+const EXPLORER_BUILD="v6 · player W/L + leaderboard + franchise continuity (relocations count as one) · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -195,6 +195,43 @@ function hh(tri,sy){
   }
   return {code:tri,name:tri};
 }
+// ---------- franchise continuity ----------
+// Any historical tricode or full name resolves to the CURRENT franchise, so relocated /
+// renamed teams count as one (e.g. Rochester/Cincinnati Royals -> Kansas City -> Sacramento
+// Kings). Runs on top of hh(); edit this table to adjust groupings.
+const FRANCHISE_DEFS=[
+  ["ATL","Atlanta Hawks",["TRI","MLH","STL","ATL"],["Tri-Cities Blackhawks","Milwaukee Hawks","St. Louis Hawks"]],
+  ["GSW","Golden State Warriors",["PHW","SFW","GOS","GSW"],["Philadelphia Warriors","San Francisco Warriors"]],
+  ["SAC","Sacramento Kings",["ROC","CIN","KCO","KCK","SAC"],["Rochester Royals","Cincinnati Royals","Kansas City-Omaha Kings","Kansas City Kings"]],
+  ["PHI","Philadelphia 76ers",["SYR","PHI"],["Syracuse Nationals"]],
+  ["DET","Detroit Pistons",["FTW","DET"],["Fort Wayne Pistons"]],
+  ["WAS","Washington Wizards",["CHP","CHS","CHZ","BAL","CAP","WSB","WAS"],["Chicago Packers","Chicago Zephyrs","Baltimore Bullets","Capital Bullets","Washington Bullets"]],
+  ["OKC","Oklahoma City Thunder",["SEA","OKC"],["Seattle SuperSonics"]],
+  ["UTA","Utah Jazz",["NOJ","UTA"],["New Orleans Jazz"]],
+  ["HOU","Houston Rockets",["SDR","HOU"],["San Diego Rockets"]],
+  ["LAC","LA Clippers",["BUF","SDC","LAC"],["Buffalo Braves","San Diego Clippers","Los Angeles Clippers"]],
+  ["LAL","Los Angeles Lakers",["MNL","LAL"],["Minneapolis Lakers"]],
+  ["BKN","Brooklyn Nets",["NJA","NYN","NJN","BRK","BKN"],["New Jersey Americans","New York Nets","New Jersey Nets"]],
+  ["MEM","Memphis Grizzlies",["VAN","MEM"],["Vancouver Grizzlies"]],
+  ["NOP","New Orleans Pelicans",["NOH","NOK","NOP"],["New Orleans Hornets","New Orleans/Oklahoma City Hornets"]],
+  ["CHA","Charlotte Hornets",["CHH","CHA","CHO"],["Charlotte Bobcats"]],
+  ["SAS","San Antonio Spurs",["SAS"],["Dallas Chaparrals","Texas Chaparrals"]],
+  ["DEN","Denver Nuggets",["DEN"],["Denver Rockets"]],
+];
+const FRANCHISE={};
+for(const [code,name,tris,names] of FRANCHISE_DEFS){ const v={code,name};
+  for(const t of tris) FRANCHISE["T:"+t.toUpperCase()]=v;
+  for(const nm of (names||[])) FRANCHISE["N:"+nm.toUpperCase()]=v;
+  FRANCHISE["N:"+name.toUpperCase()]=v;
+}
+function franchise(tri,sy){
+  const m=hh(tri,sy);
+  return FRANCHISE["T:"+(tri||"").toUpperCase()]
+      || FRANCHISE["N:"+((m&&m.name)||"").toUpperCase()]
+      || FRANCHISE["T:"+((m&&m.code)||"").toUpperCase()]
+      || m;
+}
+
 // game type is encoded in the gameId's 3rd character
 function gameType(gid){
   const c=String(gid||"")[2];
@@ -379,7 +416,7 @@ async function buildPlayerWL(name){
       const g=gid[r.gameId]; if(!g||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore) continue;
       const c=gameType(r.gameId).s, cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat) continue;
       const won = r.homeGame ? (g.homeScore>g.awayScore) : (g.awayScore>g.homeScore);
-      const e=ent(hh(r.team,sy)); if(won)e[cat].w++; else e[cat].l++;
+      const e=ent(franchise(r.team,sy)); if(won)e[cat].w++; else e[cat].l++;
     }
   }
   return acc;
@@ -451,7 +488,7 @@ async function buildLB(){
       const g=gid[r.gameId]; if(!g||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore)continue;
       const c=gameType(r.gameId).s,cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat)continue;
       const won=r.homeGame?(g.homeScore>g.awayScore):(g.awayScore>g.homeScore);
-      const m=hh(r.team,sy); lbCodeName[m.code]=m.name;
+      const m=franchise(r.team,sy); lbCodeName[m.code]=m.name;
       const p=acc[r.name]||(acc[r.name]={teams:{}});
       const tt=p.teams[m.code]||(p.teams[m.code]={rs:{w:0,l:0},po:{w:0,l:0}});
       tt[cat][won?"w":"l"]++;
