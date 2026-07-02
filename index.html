@@ -133,7 +133,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v7 · full franchise names (all 30 + defunct), leaderboard defaults to all-time & auto-builds · 2026-07-02";
+const EXPLORER_BUILD="v7b · full franchise names (+PHL/SAN) + unmapped-code diagnostic · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -210,7 +210,7 @@ const FRANCHISE_DEFS=[
   ["DAL","Dallas Mavericks",["DAL"],[]],
   ["DEN","Denver Nuggets",["DEN","DNR"],["Denver Rockets"]],
   ["DET","Detroit Pistons",["FTW","DET"],["Fort Wayne Pistons"]],
-  ["GSW","Golden State Warriors",["PHW","SFW","GOS","GSW"],["Philadelphia Warriors","San Francisco Warriors"]],
+  ["GSW","Golden State Warriors",["PHW","PHL","SFW","SFO","GOS","GSW"],["Philadelphia Warriors","San Francisco Warriors"]],
   ["HOU","Houston Rockets",["SDR","HOU"],["San Diego Rockets"]],
   ["IND","Indiana Pacers",["IND"],[]],
   ["LAC","LA Clippers",["BUF","SDC","LAC"],["Buffalo Braves","San Diego Clippers","Los Angeles Clippers"]],
@@ -227,7 +227,7 @@ const FRANCHISE_DEFS=[
   ["PHX","Phoenix Suns",["PHX","PHO"],[]],
   ["POR","Portland Trail Blazers",["POR"],[]],
   ["SAC","Sacramento Kings",["ROC","CIN","KCO","KCK","SAC"],["Rochester Royals","Cincinnati Royals","Kansas City-Omaha Kings","Kansas City Kings"]],
-  ["SAS","San Antonio Spurs",["SAS"],["Dallas Chaparrals","Texas Chaparrals"]],
+  ["SAS","San Antonio Spurs",["SAS","SAN","SAA"],["Dallas Chaparrals","Texas Chaparrals"]],
   ["TOR","Toronto Raptors",["TOR"],[]],
   ["UTA","Utah Jazz",["NOJ","UTA"],["New Orleans Jazz"]],
   ["WAS","Washington Wizards",["CHP","CHZ","BAL","CAP","WSB","WAS"],["Chicago Packers","Chicago Zephyrs","Capital Bullets","Washington Bullets"]],
@@ -525,6 +525,8 @@ async function buildLB(){
     }
   }
   $("lbGo").disabled=false; lbBuilding=false; lbAcc=acc;
+  const unmapped=Object.keys(lbCodeName).filter(c=>lbCodeName[c]===c);
+  if(unmapped.length) console.warn("[franchise] unmapped team codes - tell Claude to add these:", unmapped.sort().join(", "));
   const opts=Object.keys(lbCodeName).map(c=>({c,n:lbCodeName[c]})).sort((x,y)=>x.n.localeCompare(y.n));
   const cur=$("lbTeam").value;
   $("lbTeam").innerHTML='<option value="">All teams</option>'+opts.map(o=>`<option value="${esc(o.c)}">${esc(o.n)}</option>`).join("");
