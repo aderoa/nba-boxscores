@@ -133,7 +133,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v6 · player W/L + leaderboard + franchise continuity (relocations count as one) · 2026-07-02";
+const EXPLORER_BUILD="v7 · full franchise names (all 30 + defunct), leaderboard defaults to all-time & auto-builds · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -200,23 +200,53 @@ function hh(tri,sy){
 // renamed teams count as one (e.g. Rochester/Cincinnati Royals -> Kansas City -> Sacramento
 // Kings). Runs on top of hh(); edit this table to adjust groupings.
 const FRANCHISE_DEFS=[
+  // current 30 franchises (with relocation / rename history)
   ["ATL","Atlanta Hawks",["TRI","MLH","STL","ATL"],["Tri-Cities Blackhawks","Milwaukee Hawks","St. Louis Hawks"]],
-  ["GSW","Golden State Warriors",["PHW","SFW","GOS","GSW"],["Philadelphia Warriors","San Francisco Warriors"]],
-  ["SAC","Sacramento Kings",["ROC","CIN","KCO","KCK","SAC"],["Rochester Royals","Cincinnati Royals","Kansas City-Omaha Kings","Kansas City Kings"]],
-  ["PHI","Philadelphia 76ers",["SYR","PHI"],["Syracuse Nationals"]],
+  ["BOS","Boston Celtics",["BOS"],[]],
+  ["BKN","Brooklyn Nets",["NJA","NYN","NJN","BRK","BKN"],["New Jersey Americans","New York Nets","New Jersey Nets"]],
+  ["CHA","Charlotte Hornets",["CHH","CHA","CHO"],["Charlotte Bobcats"]],
+  ["CHI","Chicago Bulls",["CHI"],[]],
+  ["CLE","Cleveland Cavaliers",["CLE"],[]],
+  ["DAL","Dallas Mavericks",["DAL"],[]],
+  ["DEN","Denver Nuggets",["DEN","DNR"],["Denver Rockets"]],
   ["DET","Detroit Pistons",["FTW","DET"],["Fort Wayne Pistons"]],
-  ["WAS","Washington Wizards",["CHP","CHS","CHZ","BAL","CAP","WSB","WAS"],["Chicago Packers","Chicago Zephyrs","Baltimore Bullets","Capital Bullets","Washington Bullets"]],
-  ["OKC","Oklahoma City Thunder",["SEA","OKC"],["Seattle SuperSonics"]],
-  ["UTA","Utah Jazz",["NOJ","UTA"],["New Orleans Jazz"]],
+  ["GSW","Golden State Warriors",["PHW","SFW","GOS","GSW"],["Philadelphia Warriors","San Francisco Warriors"]],
   ["HOU","Houston Rockets",["SDR","HOU"],["San Diego Rockets"]],
+  ["IND","Indiana Pacers",["IND"],[]],
   ["LAC","LA Clippers",["BUF","SDC","LAC"],["Buffalo Braves","San Diego Clippers","Los Angeles Clippers"]],
   ["LAL","Los Angeles Lakers",["MNL","LAL"],["Minneapolis Lakers"]],
-  ["BKN","Brooklyn Nets",["NJA","NYN","NJN","BRK","BKN"],["New Jersey Americans","New York Nets","New Jersey Nets"]],
   ["MEM","Memphis Grizzlies",["VAN","MEM"],["Vancouver Grizzlies"]],
+  ["MIA","Miami Heat",["MIA"],[]],
+  ["MIL","Milwaukee Bucks",["MIL"],[]],
+  ["MIN","Minnesota Timberwolves",["MIN"],[]],
   ["NOP","New Orleans Pelicans",["NOH","NOK","NOP"],["New Orleans Hornets","New Orleans/Oklahoma City Hornets"]],
-  ["CHA","Charlotte Hornets",["CHH","CHA","CHO"],["Charlotte Bobcats"]],
+  ["NYK","New York Knicks",["NYK"],[]],
+  ["OKC","Oklahoma City Thunder",["SEA","OKC"],["Seattle SuperSonics"]],
+  ["ORL","Orlando Magic",["ORL"],[]],
+  ["PHI","Philadelphia 76ers",["SYR","PHI"],["Syracuse Nationals"]],
+  ["PHX","Phoenix Suns",["PHX","PHO"],[]],
+  ["POR","Portland Trail Blazers",["POR"],[]],
+  ["SAC","Sacramento Kings",["ROC","CIN","KCO","KCK","SAC"],["Rochester Royals","Cincinnati Royals","Kansas City-Omaha Kings","Kansas City Kings"]],
   ["SAS","San Antonio Spurs",["SAS"],["Dallas Chaparrals","Texas Chaparrals"]],
-  ["DEN","Denver Nuggets",["DEN"],["Denver Rockets"]],
+  ["TOR","Toronto Raptors",["TOR"],[]],
+  ["UTA","Utah Jazz",["NOJ","UTA"],["New Orleans Jazz"]],
+  ["WAS","Washington Wizards",["CHP","CHZ","BAL","CAP","WSB","WAS"],["Chicago Packers","Chicago Zephyrs","Capital Bullets","Washington Bullets"]],
+  // defunct early franchises (1946-1950s), kept distinct
+  ["AND","Anderson Packers",["AND"],[]],
+  ["BLB","Baltimore Bullets (1947-54)",["BLT","BLB"],[]],
+  ["BOM","St. Louis Bombers",["BOM"],[]],
+  ["CHS","Chicago Stags",["CHS"],[]],
+  ["CLR","Cleveland Rebels",["CLR"],[]],
+  ["DTF","Detroit Falcons",["DTF"],[]],
+  ["DNN","Denver Nuggets (1949-50)",["DN","DNN"],[]],
+  ["HUS","Toronto Huskies",["HUS"],[]],
+  ["INJ","Indianapolis Jets",["JET","INJ"],[]],
+  ["INO","Indianapolis Olympians",["INO"],[]],
+  ["PIT","Pittsburgh Ironmen",["PIT"],[]],
+  ["PRO","Providence Steamrollers",["PRO"],[]],
+  ["SHE","Sheboygan Red Skins",["SHE"],[]],
+  ["WAT","Waterloo Hawks",["WAT"],[]],
+  ["WSC","Washington Capitols",["WSC","CAP49"],[]],
 ];
 const FRANCHISE={};
 for(const [code,name,tris,names] of FRANCHISE_DEFS){ const v={code,name};
@@ -474,11 +504,11 @@ async function onWlHash(){
 window.addEventListener("hashchange",onWlHash);
 
 // ---------- W/L leaderboard ----------
-let lbAcc=null, lbCodeName={}, lbSort={key:"tot_pct",dir:-1};
+let lbAcc=null, lbCodeName={}, lbSort={key:"tot_pct",dir:-1}, lbBuilding=false;
 async function buildLB(){
   const a=+$("lbFrom").value,b=+$("lbTo").value,lo=Math.min(a,b),hi=Math.max(a,b);
   await playerIndex(); await teamCodes();
-  const acc={}; lbCodeName={}; let loaded=0,skipped=0; $("lbGo").disabled=true;
+  const acc={}; lbCodeName={}; let loaded=0,skipped=0; lbBuilding=true; $("lbGo").disabled=true;
   for(let sy=lo;sy<=hi;sy++){
     status(`Leaderboard: ${fmtSeason(sy)}\u2026 (${loaded} seasons)`);
     let bx,gs; try{bx=await box(sy);gs=await games(sy);}catch(e){skipped++;continue;}
@@ -494,7 +524,7 @@ async function buildLB(){
       tt[cat][won?"w":"l"]++;
     }
   }
-  $("lbGo").disabled=false; lbAcc=acc;
+  $("lbGo").disabled=false; lbBuilding=false; lbAcc=acc;
   const opts=Object.keys(lbCodeName).map(c=>({c,n:lbCodeName[c]})).sort((x,y)=>x.n.localeCompare(y.n));
   const cur=$("lbTeam").value;
   $("lbTeam").innerHTML='<option value="">All teams</option>'+opts.map(o=>`<option value="${esc(o.c)}">${esc(o.n)}</option>`).join("");
@@ -535,6 +565,7 @@ function setTab(t){
     $("tab"+x).classList.toggle("on",x===t);
     $("pane"+x).style.display=x===t?"":"none";
   }
+  if(t==="LB" && !lbAcc && !lbBuilding) buildLB();
 }
 $("tabDate").onclick=()=>setTab("Date");
 $("tabTeam").onclick=()=>setTab("Team");
@@ -553,7 +584,7 @@ $("teamSeason").addEventListener("change",fillTeams);
   const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
   $("teamSeason").innerHTML=opts.join("");
   $("lbFrom").innerHTML=opts.join("");$("lbTo").innerHTML=opts.join("");
-  $("lbFrom").value=LAST_SY;$("lbTo").value=LAST_SY;
+  $("lbFrom").value=FIRST_SY;$("lbTo").value=LAST_SY;
   const y=new Date();y.setDate(y.getDate()-1);
   $("dateInput").value=y.toISOString().slice(0,10);
   fillTeams();
