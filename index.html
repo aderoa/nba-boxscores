@@ -71,6 +71,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
     <button id="tabTeam">By team</button>
     <button id="tabPlayer">By player</button>
     <button id="tabWL">Player W / L</button>
+    <button id="tabLB">Leaderboard</button>
   </div>
 
   <div class="panel" id="paneDate">
@@ -113,6 +114,18 @@ table.wl td.n{font-family:'Oswald',sans-serif}
     <div class="sub" style="margin:8px 2px 0">A player's win/loss record — Regular Season, Playoffs and combined, with win %. Filter by team to see their record with each franchise. Click a column to sort; the address bar becomes a shareable link.</div>
   </div>
 
+  <div class="panel" id="paneLB" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div><label>From</label><br><select id="lbFrom"></select></div>
+      <div><label>To</label><br><select id="lbTo"></select></div>
+      <div><label>Min games</label><br><input type="number" id="lbMin" value="0" min="0" style="width:90px"></div>
+      <div><label>Team</label><br><select id="lbTeam"><option value="">All teams</option></select></div>
+      <div><label>Show rows</label><br><input type="number" id="lbCount" value="100" min="2" style="width:90px"></div>
+      <button class="go" id="lbGo">Build leaderboard</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">Every player's W/L over the season range, sortable. Set <b>Min games</b> to qualify. Sort descending for the top, ascending for the bottom — and when the list is long it shows both ends. Team filter = record with that franchise. Click a player to open their full W/L. (All-time = wide range; loads box scores per season, so start narrow.)</div>
+  </div>
+
   <div class="status" id="status"></div>
   <div id="out"></div>
   <div class="note"><span id="buildStamp" style="color:var(--gold)"></span><br>Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
@@ -120,7 +133,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v4 · player W/L (RS/PO/combined, win%, per-team filter, deep link) · 2026-07-02";
+const EXPLORER_BUILD="v5 · player W/L + all-player leaderboard (sortable, min-games, team filter, top/bottom) · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -423,10 +436,65 @@ async function onWlHash(){
 }
 window.addEventListener("hashchange",onWlHash);
 
+// ---------- W/L leaderboard ----------
+let lbAcc=null, lbCodeName={}, lbSort={key:"tot_pct",dir:-1};
+async function buildLB(){
+  const a=+$("lbFrom").value,b=+$("lbTo").value,lo=Math.min(a,b),hi=Math.max(a,b);
+  await playerIndex(); await teamCodes();
+  const acc={}; lbCodeName={}; let loaded=0,skipped=0; $("lbGo").disabled=true;
+  for(let sy=lo;sy<=hi;sy++){
+    status(`Leaderboard: ${fmtSeason(sy)}\u2026 (${loaded} seasons)`);
+    let bx,gs; try{bx=await box(sy);gs=await games(sy);}catch(e){skipped++;continue;}
+    loaded++;
+    const gid={};for(const g of gs)gid[g.gameId]=g;
+    for(const r of bx){
+      const g=gid[r.gameId]; if(!g||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore)continue;
+      const c=gameType(r.gameId).s,cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat)continue;
+      const won=r.homeGame?(g.homeScore>g.awayScore):(g.awayScore>g.homeScore);
+      const m=hh(r.team,sy); lbCodeName[m.code]=m.name;
+      const p=acc[r.name]||(acc[r.name]={teams:{}});
+      const tt=p.teams[m.code]||(p.teams[m.code]={rs:{w:0,l:0},po:{w:0,l:0}});
+      tt[cat][won?"w":"l"]++;
+    }
+  }
+  $("lbGo").disabled=false; lbAcc=acc;
+  const opts=Object.keys(lbCodeName).map(c=>({c,n:lbCodeName[c]})).sort((x,y)=>x.n.localeCompare(y.n));
+  const cur=$("lbTeam").value;
+  $("lbTeam").innerHTML='<option value="">All teams</option>'+opts.map(o=>`<option value="${esc(o.c)}">${esc(o.n)}</option>`).join("");
+  if(opts.some(o=>o.c===cur))$("lbTeam").value=cur;
+  status(`Leaderboard: ${Object.keys(acc).length} players \u00b7 ${loaded} season(s)${skipped?` \u00b7 ${skipped} no data`:""}`);
+  renderLB();
+}
+function renderLB(){
+  if(!lbAcc){$("out").innerHTML="";return;}
+  const minG=+$("lbMin").value||0, filt=$("lbTeam").value, cap=Math.max(2,+$("lbCount").value||100);
+  const rows=[];
+  for(const name in lbAcc){
+    const p=lbAcc[name]; let rw=0,rl=0,pw=0,pl=0;
+    if(filt){ const tt=p.teams[filt]; if(!tt)continue; rw=tt.rs.w;rl=tt.rs.l;pw=tt.po.w;pl=tt.po.l; }
+    else { for(const c in p.teams){const tt=p.teams[c];rw+=tt.rs.w;rl+=tt.rs.l;pw+=tt.po.w;pl+=tt.po.l;} }
+    const g=rw+rl+pw+pl; if(g<minG)continue;
+    rows.push({name,dn:disp(name),rs_w:rw,rs_l:rl,rs_pct:pnum(rw,rl),po_w:pw,po_l:pl,po_pct:pnum(pw,pl),tot_w:rw+pw,tot_l:rl+pl,tot_pct:pnum(rw+pw,rl+pl),tot_g:g});
+  }
+  const {key,dir}=lbSort;
+  rows.sort((x,y)=>{const av=x[key],bv=y[key];if(key==="dn")return dir*av.localeCompare(bv);return dir*(av-bv)||x.dn.localeCompare(y.dn);});
+  rows.forEach((r,i)=>r.rank=i+1);
+  let show=rows, note=`${rows.length} players`;
+  if(rows.length>cap){ const half=Math.floor(cap/2); show=rows.slice(0,half).concat([{sep:rows.length-2*half}]).concat(rows.slice(rows.length-half)); note=`${rows.length} players \u00b7 top ${half} + bottom ${half}`; }
+  const COLS=[["rank","#","right",false],["dn","Player","left",true],["rs_w","RS W","right",true],["rs_l","RS L","right",true],["rs_pct","RS %","right",true],["po_w","PO W","right",true],["po_l","PO L","right",true],["po_pct","PO %","right",true],["tot_w","W","right",true],["tot_l","L","right",true],["tot_pct","Win %","right",true]];
+  const th=COLS.map(c=>`<th style="text-align:${c[2]}" ${c[3]?`onclick="lbSortBy('${c[0]}')"`:""}>${c[1]}${key===c[0]?(dir<0?" \u25be":" \u25b4"):""}</th>`).join("");
+  const cell=(r,k)=>{ if(k==="rank")return r.rank; if(k==="dn")return `<a href="#" style="color:inherit" onclick="event.preventDefault();lbGoto('${esc(r.name).replace(/'/g,"\\'")}')">${esc(r.dn)}</a>`; if(k.endsWith("_pct")){const p=k.replace("_pct","");return fmtPct(r[p+"_w"],r[p+"_l"]);} return r[k]; };
+  const body=show.map(r=> r.sep!==undefined ? `<tr><td colspan="${COLS.length}" style="text-align:center;color:var(--dim)">\u2026 ${r.sep} more \u2026</td></tr>` : "<tr>"+COLS.map(c=>`<td class="${c[0]==='dn'?'n':''}" style="text-align:${c[2]}">${cell(r,c[0])}</td>`).join("")+"</tr>").join("");
+  const scope=filt?(lbCodeName[filt]||filt):"All teams";
+  $("out").innerHTML=`<div class="teamhd">W/L Leaderboard <span style="color:var(--dim);font-size:12px">(${esc(scope)}, min ${minG} G) \u00b7 ${note}</span></div><div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function lbSortBy(k){ if(lbSort.key===k)lbSort.dir*=-1; else lbSort={key:k,dir:k==="dn"?1:-1}; renderLB(); }
+window.lbGoto=name=>{ setTab("WL"); loadPlayerWL(name,""); };
+
 // ---------- tabs & init ----------
 function setTab(t){
   activeTab=t;
-  for(const x of["Date","Team","Player","WL"]){
+  for(const x of["Date","Team","Player","WL","LB"]){
     $("tab"+x).classList.toggle("on",x===t);
     $("pane"+x).style.display=x===t?"":"none";
   }
@@ -435,6 +503,9 @@ $("tabDate").onclick=()=>setTab("Date");
 $("tabTeam").onclick=()=>setTab("Team");
 $("tabPlayer").onclick=()=>setTab("Player");
 $("tabWL").onclick=()=>setTab("WL");
+$("tabLB").onclick=()=>setTab("LB");
+$("lbGo").onclick=buildLB;
+["lbMin","lbTeam","lbCount"].forEach(id=>$(id).addEventListener("change",()=>{if(lbAcc)renderLB();}));
 $("wlTeam").addEventListener("change",()=>{syncWlHash();renderPlayerWL();});
 $("wlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
 $("dateGo").onclick=showDate;
@@ -444,6 +515,8 @@ $("teamSeason").addEventListener("change",fillTeams);
   $("buildStamp").textContent="build "+EXPLORER_BUILD;
   const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
   $("teamSeason").innerHTML=opts.join("");
+  $("lbFrom").innerHTML=opts.join("");$("lbTo").innerHTML=opts.join("");
+  $("lbFrom").value=LAST_SY;$("lbTo").value=LAST_SY;
   const y=new Date();y.setDate(y.getDate()-1);
   $("dateInput").value=y.toISOString().slice(0,10);
   fillTeams();
