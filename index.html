@@ -46,6 +46,13 @@ tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
 .bk:hover{color:var(--gold)}
 .note{color:var(--dim);font-size:11px;margin-top:10px}
 @media(max-width:700px){th,td{padding:5px 5px;font-size:11px}}
+table.wl{border-collapse:collapse;width:100%;font-size:12px}
+table.wl th,table.wl td{padding:5px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.wl th{color:var(--dim);text-transform:uppercase;letter-spacing:1px;font-size:10px;cursor:pointer;user-select:none;position:sticky;top:0;background:var(--panel)}
+table.wl th:hover{color:var(--gold)}
+table.wl td.n{font-family:'Oswald',sans-serif}
+table.wl tbody tr:hover{background:var(--panel2)}
+.wl .sep{border-left:1px solid var(--line)}
 </style>
 </head>
 <body>
@@ -57,6 +64,7 @@ tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
     <button id="tabDate" class="on">By date</button>
     <button id="tabTeam">By team</button>
     <button id="tabPlayer">By player</button>
+    <button id="tabWL">W / L</button>
   </div>
 
   <div class="panel" id="paneDate">
@@ -86,6 +94,15 @@ tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
     <div id="playerSeasons"></div>
   </div>
 
+  <div class="panel" id="paneWL" style="display:none">
+    <div class="row">
+      <label>From</label><select id="wlFrom"></select>
+      <label>To</label><select id="wlTo"></select>
+      <button class="go" id="wlGo">Build W/L table</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">Team win/loss records — Regular Season, Playoffs, and combined, with win %. Franchises are tracked across relocations; Preseason, All-Star and Play-In games are excluded. Click any column to sort. All-time loads many seasons on first build.</div>
+  </div>
+
   <div class="status" id="status"></div>
   <div id="out"></div>
   <div class="note"><span id="buildStamp" style="color:var(--gold)"></span><br>Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
@@ -93,7 +110,7 @@ tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v3 · full team names + HH nomenclature · 2026-06-10";
+const EXPLORER_BUILD="v4 · + W/L database (RS/PO/combined, win%, per team) · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -319,10 +336,68 @@ $("playerInput").addEventListener("input",async()=>{
 });
 window.__pick=n=>{$("playerInput").value=n;pickPlayer(n)};
 
+// ---------- W / L database ----------
+let wlData=null, wlSort={key:"tot_pct",dir:-1};
+function fmtPct(w,l){const g=w+l;return g?(w/g).toFixed(3).replace(/^0(?=\.)/,''):"\u2014";}
+const WLCOLS=[
+  {k:"name",  h:"Team",   al:"left",  d:r=>esc(r.name), cls:"n"},
+  {k:"rs_w",  h:"RS W",   al:"right", d:r=>r.rs_w},
+  {k:"rs_l",  h:"RS L",   al:"right", d:r=>r.rs_l},
+  {k:"rs_pct",h:"RS %",   al:"right", d:r=>fmtPct(r.rs_w,r.rs_l)},
+  {k:"po_w",  h:"PO W",   al:"right", d:r=>r.po_w, sep:true},
+  {k:"po_l",  h:"PO L",   al:"right", d:r=>r.po_l},
+  {k:"po_pct",h:"PO %",   al:"right", d:r=>fmtPct(r.po_w,r.po_l)},
+  {k:"tot_w", h:"W",      al:"right", d:r=>r.tot_w, sep:true},
+  {k:"tot_l", h:"L",      al:"right", d:r=>r.tot_l},
+  {k:"tot_pct",h:"Win %", al:"right", d:r=>fmtPct(r.tot_w,r.tot_l)},
+];
+async function buildWL(){
+  const a=+$("wlFrom").value, b=+$("wlTo").value, lo=Math.min(a,b), hi=Math.max(a,b);
+  const acc={};
+  const ent=m=>{ if(!acc[m.code]) acc[m.code]={code:m.code,name:m.name,rs:{w:0,l:0},po:{w:0,l:0}}; acc[m.code].name=m.name; return acc[m.code]; };
+  let loaded=0, skipped=0;
+  $("wlGo").disabled=true;
+  for(let sy=lo; sy<=hi; sy++){
+    status(`W/L: loading ${fmtSeason(sy)}\u2026 (${loaded} seasons)`);
+    let gs; try{ gs=await games(sy); }catch(e){ skipped++; continue; }
+    loaded++;
+    for(const g of gs){
+      if(g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore) continue;
+      const c=gameType(g.gameId).s, cat=c==="RS"?"rs":c==="PO"?"po":null;
+      if(!cat) continue;
+      const he=ent(hh(g.home,sy)), ae=ent(hh(g.away,sy));
+      if(g.homeScore>g.awayScore){ he[cat].w++; ae[cat].l++; } else { ae[cat].w++; he[cat].l++; }
+    }
+  }
+  $("wlGo").disabled=false;
+  wlData=Object.values(acc).map(e=>({
+    name:e.name, code:e.code,
+    rs_w:e.rs.w, rs_l:e.rs.l, rs_pct:(e.rs.w+e.rs.l)?e.rs.w/(e.rs.w+e.rs.l):-1,
+    po_w:e.po.w, po_l:e.po.l, po_pct:(e.po.w+e.po.l)?e.po.w/(e.po.w+e.po.l):-1,
+    tot_w:e.rs.w+e.po.w, tot_l:e.rs.l+e.po.l,
+    tot_pct:(e.rs.w+e.po.w+e.rs.l+e.po.l)?(e.rs.w+e.po.w)/(e.rs.w+e.po.w+e.rs.l+e.po.l):-1
+  }));
+  status(`W/L: ${wlData.length} franchises \u00b7 ${loaded} season(s) loaded${skipped?` \u00b7 ${skipped} with no data`:""}`);
+  renderWL();
+}
+function wlSortBy(k){ if(wlSort.key===k) wlSort.dir*=-1; else wlSort={key:k,dir:k==="name"?1:-1}; renderWL(); }
+function renderWL(){
+  if(!wlData){ $("out").innerHTML=""; return; }
+  const {key,dir}=wlSort;
+  const rows=wlData.slice().sort((x,y)=>{
+    const av=x[key], bv=y[key];
+    if(typeof av==="string") return dir*av.localeCompare(bv);
+    return dir*(av-bv) || x.name.localeCompare(y.name);
+  });
+  const head=WLCOLS.map(c=>`<th class="${c.sep?'sep':''}" style="text-align:${c.al}" onclick="wlSortBy('${c.k}')">${c.h}${key===c.k?(dir<0?" \u25be":" \u25b4"):""}</th>`).join("");
+  const body=rows.map(r=>"<tr>"+WLCOLS.map(c=>`<td class="${c.cls||''} ${c.sep?'sep':''}" style="text-align:${c.al}">${c.d(r)}</td>`).join("")+"</tr>").join("");
+  $("out").innerHTML=`<div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
 // ---------- tabs & init ----------
 function setTab(t){
   activeTab=t;
-  for(const x of["Date","Team","Player"]){
+  for(const x of["Date","Team","Player","WL"]){
     $("tab"+x).classList.toggle("on",x===t);
     $("pane"+x).style.display=x===t?"":"none";
   }
@@ -330,6 +405,8 @@ function setTab(t){
 $("tabDate").onclick=()=>setTab("Date");
 $("tabTeam").onclick=()=>setTab("Team");
 $("tabPlayer").onclick=()=>setTab("Player");
+$("tabWL").onclick=()=>setTab("WL");
+$("wlGo").onclick=buildWL;
 $("dateGo").onclick=showDate;
 $("teamGo").onclick=showTeam;
 $("teamSeason").addEventListener("change",fillTeams);
@@ -337,6 +414,8 @@ $("teamSeason").addEventListener("change",fillTeams);
   $("buildStamp").textContent="build "+EXPLORER_BUILD;
   const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
   $("teamSeason").innerHTML=opts.join("");
+  $("wlFrom").innerHTML=opts.join("");$("wlTo").innerHTML=opts.join("");
+  $("wlFrom").value=FIRST_SY;$("wlTo").value=LAST_SY;
   const y=new Date();y.setDate(y.getDate()-1);
   $("dateInput").value=y.toISOString().slice(0,10);
   fillTeams();
