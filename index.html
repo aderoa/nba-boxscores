@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NBA Box Score Database — Explorer WL</title>
+<title>NBA Box Score Database — Explorer</title>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#0b0b1a;--panel:#14142b;--panel2:#1b1b36;--line:#2a2a4d;--tx:#e8e8f4;--dim:#8a8ab0;--gold:#ffd24d;--acc:#ff5a36;--green:#34d97a}
@@ -133,7 +133,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v7c · +MIH/TCB (Hawks), DEF (Detroit Falcons) · 2026-07-02";
+const EXPLORER_BUILD="v7d · +UTH (Utah Jazz) · 2026-07-02";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -229,7 +229,7 @@ const FRANCHISE_DEFS=[
   ["SAC","Sacramento Kings",["ROC","CIN","KCO","KCK","SAC"],["Rochester Royals","Cincinnati Royals","Kansas City-Omaha Kings","Kansas City Kings"]],
   ["SAS","San Antonio Spurs",["SAS","SAN","SAA"],["Dallas Chaparrals","Texas Chaparrals"]],
   ["TOR","Toronto Raptors",["TOR"],[]],
-  ["UTA","Utah Jazz",["NOJ","UTA"],["New Orleans Jazz"]],
+  ["UTA","Utah Jazz",["NOJ","UTA","UTH"],["New Orleans Jazz"]],
   ["WAS","Washington Wizards",["CHP","CHZ","BAL","CAP","WSB","WAS"],["Chicago Packers","Chicago Zephyrs","Capital Bullets","Washington Bullets"]],
   // defunct early franchises (1946-1950s), kept distinct
   ["AND","Anderson Packers",["AND"],[]],
