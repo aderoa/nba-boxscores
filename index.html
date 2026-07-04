@@ -119,6 +119,8 @@ table.wl td.n{font-family:'Oswald',sans-serif}
       <div><label>From</label><br><select id="lbFrom"></select></div>
       <div><label>To</label><br><select id="lbTo"></select></div>
       <div><label>Min games</label><br><input type="number" id="lbMin" value="0" min="0" style="width:90px"></div>
+      <div><label>Min RS</label><br><input type="number" id="lbMinRS" value="0" min="0" style="width:80px"></div>
+      <div><label>Min PO</label><br><input type="number" id="lbMinPO" value="0" min="0" style="width:80px"></div>
       <div><label>Team</label><br><select id="lbTeam"><option value="">All teams</option></select></div>
       <div><label>Show rows</label><br><input type="number" id="lbCount" value="100" min="2" style="width:90px"></div>
       <button class="go" id="lbGo">Build leaderboard</button>
@@ -133,7 +135,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v8c · personId aliases everywhere (search view now splits same-named players too) · 2026-07-03";
+const EXPLORER_BUILD="v8d · leaderboard: separate Min RS / Min PO game filters · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -566,13 +568,14 @@ async function buildLB(){
 }
 function renderLB(){
   if(!lbAcc){$("out").innerHTML="";return;}
-  const minG=+$("lbMin").value||0, filt=$("lbTeam").value, cap=Math.max(2,+$("lbCount").value||100);
+  const minG=+$("lbMin").value||0, minRS=+$("lbMinRS").value||0, minPO=+$("lbMinPO").value||0, filt=$("lbTeam").value, cap=Math.max(2,+$("lbCount").value||100);
+  const minLabel="min "+minG+" G"+(minRS?", "+minRS+" RS":"")+(minPO?", "+minPO+" PO":"");
   const rows=[];
   for(const pid in lbAcc){
     const p=lbAcc[pid]; let rw=0,rl=0,pw=0,pl=0;
     if(filt){ const tt=p.teams[filt]; if(!tt)continue; rw=tt.rs.w;rl=tt.rs.l;pw=tt.po.w;pl=tt.po.l; }
     else { for(const c in p.teams){const tt=p.teams[c];rw+=tt.rs.w;rl+=tt.rs.l;pw+=tt.po.w;pl+=tt.po.l;} }
-    const g=rw+rl+pw+pl; if(g<minG)continue;
+    const rsG=rw+rl, poG=pw+pl, g=rsG+poG; if(g<minG||rsG<minRS||poG<minPO)continue;
     rows.push({pid:p.pid,dn:p.dn,rs_w:rw,rs_l:rl,rs_pct:pnum(rw,rl),po_w:pw,po_l:pl,po_pct:pnum(pw,pl),tot_w:rw+pw,tot_l:rl+pl,tot_pct:pnum(rw+pw,rl+pl),tot_g:g});
   }
   const {key,dir}=lbSort;
@@ -585,7 +588,7 @@ function renderLB(){
   const cell=(r,k)=>{ if(k==="rank")return r.rank; if(k==="dn")return `<a href="#" style="color:inherit" onclick="event.preventDefault();lbGoto('${esc(r.pid)}')">${esc(r.dn)}</a>`; if(k.endsWith("_pct")){const p=k.replace("_pct","");return fmtPct(r[p+"_w"],r[p+"_l"]);} return r[k]; };
   const body=show.map(r=> r.sep!==undefined ? `<tr><td colspan="${COLS.length}" style="text-align:center;color:var(--dim)">\u2026 ${r.sep} more \u2026</td></tr>` : "<tr>"+COLS.map(c=>`<td class="${c[0]==='dn'?'n':''}" style="text-align:${c[2]}">${cell(r,c[0])}</td>`).join("")+"</tr>").join("");
   const scope=filt?(lbCodeName[filt]||filt):"All teams";
-  $("out").innerHTML=`<div class="teamhd">W/L Leaderboard <span style="color:var(--dim);font-size:12px">(${esc(scope)}, min ${minG} G) \u00b7 ${note}</span></div><div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+  $("out").innerHTML=`<div class="teamhd">W/L Leaderboard <span style="color:var(--dim);font-size:12px">(${esc(scope)}, ${minLabel}) \u00b7 ${note}</span></div><div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
 function lbSortBy(k){ if(lbSort.key===k)lbSort.dir*=-1; else lbSort={key:k,dir:k==="dn"?1:-1}; renderLB(); }
 window.lbGoto=pid=>{
@@ -612,7 +615,7 @@ $("tabPlayer").onclick=()=>setTab("Player");
 $("tabWL").onclick=()=>setTab("WL");
 $("tabLB").onclick=()=>setTab("LB");
 $("lbGo").onclick=buildLB;
-["lbMin","lbTeam","lbCount"].forEach(id=>$(id).addEventListener("change",()=>{if(lbAcc)renderLB();}));
+["lbMin","lbMinRS","lbMinPO","lbTeam","lbCount"].forEach(id=>$(id).addEventListener("change",()=>{if(lbAcc)renderLB();}));
 $("wlTeam").addEventListener("change",()=>{syncWlHash();renderPlayerWL();});
 $("wlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
 $("dateGo").onclick=showDate;
