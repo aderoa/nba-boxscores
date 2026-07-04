@@ -64,7 +64,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 <body>
 <div class="wrap">
   <h1>NBA <b>Box Score Database</b></h1>
-  <div class="sub">Every game since 1946-47 - updated daily</div>
+  <div class="sub">Every game since 1946-47 · updated daily</div>
 
   <div class="tabs">
     <button id="tabDate" class="on">By date</button>
@@ -133,7 +133,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v8a · personId aliases + person_alias.json loader; PHL fixed to 76ers (was wrongly GSW) · 2026-07-03";
+const EXPLORER_BUILD="v8c · personId aliases everywhere (search view now splits same-named players too) · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -445,9 +445,9 @@ function pnum(w,l){return (w+l)?w/(w+l):-1;}
 
 async function buildPlayerWL(name){
   const idx=await playerIndex(); const seasons=idx[name]; if(!seasons)return null;
-  await teamCodes();
-  const acc={};
-  const ent=m=>{if(!acc[m.code])acc[m.code]={code:m.code,name:m.name,rs:{w:0,l:0},po:{w:0,l:0}};acc[m.code].name=m.name;return acc[m.code];};
+  await teamCodes(); await ensureAliases();
+  const perPid={};
+  const ent=(p,m)=>{if(!p.teams[m.code])p.teams[m.code]={code:m.code,name:m.name,rs:{w:0,l:0},po:{w:0,l:0}};p.teams[m.code].name=m.name;return p.teams[m.code];};
   for(const sy of seasons){
     status(`W/L: ${disp(name)} \u2014 ${fmtSeason(sy)}\u2026`);
     let bx,gs; try{ bx=await box(sy); gs=await games(sy); }catch(e){ continue; }
@@ -457,21 +457,39 @@ async function buildPlayerWL(name){
       const g=gid[r.gameId]; if(!g||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore) continue;
       const c=gameType(r.gameId).s, cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat) continue;
       const won = r.homeGame ? (g.homeScore>g.awayScore) : (g.awayScore>g.homeScore);
-      const e=ent(franchise(r.team,sy)); if(won)e[cat].w++; else e[cat].l++;
+      const pid=String(r.personId);
+      const p=perPid[pid]||(perPid[pid]={pid, dn:pdisp(pid,name), teams:{}});
+      const e=ent(p, franchise(r.team,sy)); if(won)e[cat].w++; else e[cat].l++;
     }
   }
-  return acc;
+  return perPid;
 }
+
+let wlPerPid=null;
 async function loadPlayerWL(name, teamCode){
-  wlName=name; wlLabel=disp(name); wlHashable=true; status("computing W/L\u2026");
-  try{ wlAcc=await buildPlayerWL(name); }catch(e){ status("error: "+e.message); return; }
-  if(!wlAcc){ status("not in index: "+esc(name)); $("out").innerHTML=""; return; }
+  status("computing W/L\u2026");
+  try{ wlPerPid=await buildPlayerWL(name); }catch(e){ status("error: "+e.message); return; }
+  if(!wlPerPid){ status("not in index: "+esc(name)); $("out").innerHTML=""; return; }
+  const pids=Object.keys(wlPerPid); status("");
+  if(pids.length===0){ $("out").innerHTML=""; return; }
+  if(pids.length===1){ showPlayerPid(pids[0], name, teamCode, true); return; }
+  wlName=null; wlHashable=false; $("wlPlayer").value=disp(name);
+  const opts=pids.map(pid=>{const p=wlPerPid[pid];const g=Object.values(p.teams).reduce((z,t)=>z+t.rs.w+t.rs.l+t.po.w+t.po.l,0);return{pid,dn:p.dn,g};}).sort((a,b)=>b.g-a.g);
+  $("out").innerHTML=`<div class="teamhd">More than one player has appeared as "${esc(disp(name))}" \u2014 pick one:</div><div class="wlcards">`+opts.map(o=>`<div class="wlcard" style="cursor:pointer" onclick="wlPickPid('${esc(o.pid)}')"><div class="lab">${o.g} games</div><div class="big" style="font-size:17px">${esc(o.dn)}</div><div class="pct">id ${esc(o.pid)}</div></div>`).join("")+`</div>`;
+}
+function showPlayerPid(pid, indexName, teamCode, hashable){
+  const p=wlPerPid&&wlPerPid[pid]; if(!p)return;
+  wlAcc={}; for(const code in p.teams) wlAcc[code]=p.teams[code];
+  wlName=indexName; wlLabel=p.dn; wlHashable=!!hashable;
   const teams=Object.values(wlAcc).sort((a,b)=>gcount(b)-gcount(a));
   $("wlTeam").innerHTML='<option value="">All teams</option>'+teams.map(t=>`<option value="${esc(t.code)}">${esc(t.name)}</option>`).join("");
   $("wlTeam").value=(teamCode && teams.some(t=>t.code===teamCode))?teamCode:"";
-  $("wlPlayer").value=disp(name);
-  status(""); syncWlHash(); renderPlayerWL();
+  $("wlPlayer").value=p.dn;
+  if(hashable) syncWlHash();
+  renderPlayerWL();
 }
+window.wlPickPid=pid=>showPlayerPid(pid, null, "", false);
+
 function syncWlHash(){ if(!wlName||!wlHashable)return; const t=$("wlTeam").value; const nh="wl="+encodeURIComponent(wlName)+(t?"&team="+encodeURIComponent(t):""); if(location.hash.replace(/^#/,"")!==nh) location.hash=nh; }
 function renderPlayerWL(){
   if(!wlAcc){$("out").innerHTML="";return;}
