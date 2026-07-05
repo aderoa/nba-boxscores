@@ -125,6 +125,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
       <div><label>Team</label><br><select id="lbTeam"><option value="">All teams</option></select></div>
       <div><label>Show rows</label><br><input type="number" id="lbCount" value="100" min="2" style="width:90px"></div>
       <button class="go" id="lbGo">Build leaderboard</button>
+      <div><label>Race type</label><br><select id="lbRaceType"><option value="tot">RS + PO</option><option value="rs">RS only</option><option value="po">PO only</option></select></div>
       <button class="go" id="lbBarRace" title="Cumulative wins per season — for a bar chart race">⬇ Bar race CSV</button>
     </div>
     <div class="sub" style="margin:8px 2px 0">Every player's W/L over the season range, sortable. Set <b>Min games</b> to qualify. Sort descending for the top, ascending for the bottom — and when the list is long it shows both ends. Team filter = record with that franchise. Click a player to open their full W/L. (All-time = wide range; loads box scores per season, so start narrow.)</div>
@@ -137,7 +138,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v8f · leaderboard: career-range picker + bar-race CSV (cumulative wins per season) · 2026-07-03";
+const EXPLORER_BUILD="v8g · bar-race CSV now supports RS / PO / combined wins · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -553,7 +554,7 @@ async function buildLB(){
       const won=r.homeGame?(g.homeScore>g.awayScore):(g.awayScore>g.homeScore);
       const m=franchise(r.team,sy); lbCodeName[m.code]=m.name;
       const pid=String(r.personId);
-      if(won){ const _sw=lbSeasonWins[pid]||(lbSeasonWins[pid]={}); _sw[sy]=(_sw[sy]||0)+1; }
+      if(won){ const _sw=lbSeasonWins[pid]||(lbSeasonWins[pid]={}); const _e=_sw[sy]||(_sw[sy]={rs:0,po:0}); _e[cat]++; }
       const p=acc[pid]||(acc[pid]={pid, dn:pdisp(pid,r.name), teams:{}});
       const tt=p.teams[m.code]||(p.teams[m.code]={rs:{w:0,l:0},po:{w:0,l:0}});
       tt[cat][won?"w":"l"]++;
@@ -573,16 +574,19 @@ function _csvCell(v){ v=(v==null?"":String(v)); return /[",\n]/.test(v)?'"'+v.re
 function downloadFile(name,text,mime){ const b=new Blob([text],{type:mime||"text/plain;charset=utf-8"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(u);},120); }
 function downloadBarRace(){
   if(!lbAcc||!lbRange){ status("Build the leaderboard first, then download the bar race."); return; }
+  const type=($("lbRaceType")&&$("lbRaceType").value)||"tot";
+  const winsOf=function(e){ return !e?0:(type==="rs"?e.rs:type==="po"?e.po:(e.rs+e.po)); };
+  const label=type==="rs"?"Regular Season":type==="po"?"Playoffs":"RS+PO";
   const lo=lbRange.lo, hi=lbRange.hi, years=[]; for(let y=lo;y<=hi;y++)years.push(y);
   const lines=[["Player",...years.map(function(y){return fmtSeason(y);})].map(_csvCell).join(",")];
   let n=0;
   for(const pid in lbAcc){
     const sw=lbSeasonWins[pid]||{}, name=lbAcc[pid].dn||pid; let cum=0; const row=[name];
-    for(const y of years){ cum+=(sw[y]||0); row.push(cum); }
+    for(const y of years){ cum+=winsOf(sw[y]); row.push(cum); }
     lines.push(row.map(_csvCell).join(",")); n++;
   }
-  downloadFile("wl-bar-race-"+lo+"-"+hi+".csv", lines.join("\n"), "text/csv;charset=utf-8");
-  status("Bar race CSV downloaded: "+n+" players \u00d7 "+years.length+" seasons (cumulative wins).");
+  downloadFile("wl-bar-race-"+type+"-"+lo+"-"+hi+".csv", lines.join("\n"), "text/csv;charset=utf-8");
+  status("Bar race CSV ("+label+"): "+n+" players \u00d7 "+years.length+" seasons (cumulative wins).");
 }
 function renderLB(){
   if(!lbAcc){$("out").innerHTML="";return;}
