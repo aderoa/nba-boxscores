@@ -124,6 +124,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
       <div><label>Min PO</label><br><input type="number" id="lbMinPO" value="0" min="0" style="width:80px"></div>
       <div><label>Team</label><br><select id="lbTeam"><option value="">All teams</option></select></div>
       <div><label>Show rows</label><br><input type="number" id="lbCount" value="100" min="2" style="width:90px"></div>
+      <div><label title="Rank franchises alongside players">Include teams</label><br><input type="checkbox" id="lbInclTeams" style="margin-top:8px;transform:scale(1.2)"></div>
       <button class="go" id="lbGo">Build leaderboard</button>
       <div><label>Race type</label><br><select id="lbRaceType"><option value="tot">RS + PO</option><option value="rs">RS only</option><option value="po">PO only</option></select></div>
       <button class="go" id="lbBarRace" title="Cumulative wins per season — for a bar chart race">⬇ Bar race CSV</button>
@@ -138,7 +139,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v8h · career range now uses only seasons actually played (skips retirement/injury gaps) · 2026-07-03";
+const EXPLORER_BUILD="v8i · leaderboard: optional include-teams (rank franchises alongside players) · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -560,6 +561,20 @@ async function buildLB(){
       const tt=p.teams[m.code]||(p.teams[m.code]={rs:{w:0,l:0},po:{w:0,l:0}});
       tt[cat][won?"w":"l"]++;
     }
+    for(const g of gs){
+      if(g.home==null||g.away==null||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore)continue;
+      const c=gameType(g.gameId).s,cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat)continue;
+      const H=franchise(g.home,sy), A=franchise(g.away,sy);
+      lbCodeName[H.code]=H.name; lbCodeName[A.code]=A.name;
+      const hw=g.homeScore>g.awayScore;
+      const wc=hw?H.code:A.code, wn=hw?H.name:A.name, lc=hw?A.code:H.code, ln=hw?A.name:H.name;
+      const wk="T:"+wc, lk="T:"+lc;
+      const we=acc[wk]||(acc[wk]={pid:wk, dn:wn, isTeam:true, teams:{}});
+      const le=acc[lk]||(acc[lk]={pid:lk, dn:ln, isTeam:true, teams:{}});
+      (we.teams[wc]||(we.teams[wc]={rs:{w:0,l:0},po:{w:0,l:0}}))[cat].w++;
+      (le.teams[lc]||(le.teams[lc]={rs:{w:0,l:0},po:{w:0,l:0}}))[cat].l++;
+      const _ts=lbSeasonWins[wk]||(lbSeasonWins[wk]={}); const _te=_ts[sy]||(_ts[sy]={rs:0,po:0}); _te[cat]++;
+    }
   }
   $("lbGo").disabled=false; lbBuilding=false; lbAcc=acc; lbSeasons=seasons;
   const unmapped=Object.keys(lbCodeName).filter(c=>lbCodeName[c]===c);
@@ -568,7 +583,7 @@ async function buildLB(){
   const cur=$("lbTeam").value;
   $("lbTeam").innerHTML='<option value="">All teams</option>'+opts.map(o=>`<option value="${esc(o.c)}">${esc(o.n)}</option>`).join("");
   if(opts.some(o=>o.c===cur))$("lbTeam").value=cur;
-  status(`Leaderboard: ${Object.keys(acc).length} players \u00b7 ${loaded} season(s)${skipped?` \u00b7 ${skipped} no data`:""}`);
+  status(`Leaderboard: ${Object.keys(acc).filter(k=>!k.startsWith("T:")).length} players \u00b7 ${loaded} season(s)${skipped?` \u00b7 ${skipped} no data`:""}`);
   renderLB();
 }
 function _csvCell(v){ v=(v==null?"":String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
@@ -579,9 +594,11 @@ function downloadBarRace(){
   const winsOf=function(e){ return !e?0:(type==="rs"?e.rs:type==="po"?e.po:(e.rs+e.po)); };
   const label=type==="rs"?"Regular Season":type==="po"?"Playoffs":"RS+PO";
   const years=lbSeasons.slice().sort((a,b)=>a-b);
-  const lines=[["Player",...years.map(function(y){return fmtSeason(y);})].map(_csvCell).join(",")];
+  const lines=[["Name",...years.map(function(y){return fmtSeason(y);})].map(_csvCell).join(",")];
+  const inclTeams=$("lbInclTeams")&&$("lbInclTeams").checked;
   let n=0;
   for(const pid in lbAcc){
+    if(lbAcc[pid].isTeam&&!inclTeams)continue;
     const sw=lbSeasonWins[pid]||{}, name=lbAcc[pid].dn||pid; let cum=0; const row=[name];
     for(const y of years){ cum+=winsOf(sw[y]); row.push(cum); }
     lines.push(row.map(_csvCell).join(",")); n++;
@@ -593,13 +610,14 @@ function renderLB(){
   if(!lbAcc){$("out").innerHTML="";return;}
   const minG=+$("lbMin").value||0, minRS=+$("lbMinRS").value||0, minPO=+$("lbMinPO").value||0, filt=$("lbTeam").value, cap=Math.max(2,+$("lbCount").value||100);
   const minLabel="min "+minG+" G"+(minRS?", "+minRS+" RS":"")+(minPO?", "+minPO+" PO":"");
+  const inclTeams=$("lbInclTeams")&&$("lbInclTeams").checked;
   const rows=[];
   for(const pid in lbAcc){
-    const p=lbAcc[pid]; let rw=0,rl=0,pw=0,pl=0;
+    const p=lbAcc[pid]; if(p.isTeam&&!inclTeams)continue; let rw=0,rl=0,pw=0,pl=0;
     if(filt){ const tt=p.teams[filt]; if(!tt)continue; rw=tt.rs.w;rl=tt.rs.l;pw=tt.po.w;pl=tt.po.l; }
     else { for(const c in p.teams){const tt=p.teams[c];rw+=tt.rs.w;rl+=tt.rs.l;pw+=tt.po.w;pl+=tt.po.l;} }
     const rsG=rw+rl, poG=pw+pl, g=rsG+poG; if(g<minG||rsG<minRS||poG<minPO)continue;
-    rows.push({pid:p.pid,dn:p.dn,rs_w:rw,rs_l:rl,rs_pct:pnum(rw,rl),po_w:pw,po_l:pl,po_pct:pnum(pw,pl),tot_w:rw+pw,tot_l:rl+pl,tot_pct:pnum(rw+pw,rl+pl),tot_g:g});
+    rows.push({pid:p.pid,dn:p.dn,isTeam:p.isTeam,rs_w:rw,rs_l:rl,rs_pct:pnum(rw,rl),po_w:pw,po_l:pl,po_pct:pnum(pw,pl),tot_w:rw+pw,tot_l:rl+pl,tot_pct:pnum(rw+pw,rl+pl),tot_g:g});
   }
   const {key,dir}=lbSort;
   rows.sort((x,y)=>{const av=x[key],bv=y[key];if(key==="dn")return dir*av.localeCompare(bv);return dir*(av-bv)||x.dn.localeCompare(y.dn);});
@@ -608,7 +626,7 @@ function renderLB(){
   if(rows.length>cap){ const half=Math.floor(cap/2); show=rows.slice(0,half).concat([{sep:rows.length-2*half}]).concat(rows.slice(rows.length-half)); note=`${rows.length} players \u00b7 top ${half} + bottom ${half}`; }
   const COLS=[["rank","#","right",false],["dn","Player","left",true],["rs_w","RS W","right",true],["rs_l","RS L","right",true],["rs_pct","RS %","right",true],["po_w","PO W","right",true],["po_l","PO L","right",true],["po_pct","PO %","right",true],["tot_w","W","right",true],["tot_l","L","right",true],["tot_pct","Win %","right",true]];
   const th=COLS.map(c=>`<th style="text-align:${c[2]}" ${c[3]?`onclick="lbSortBy('${c[0]}')"`:""}>${c[1]}${key===c[0]?(dir<0?" \u25be":" \u25b4"):""}</th>`).join("");
-  const cell=(r,k)=>{ if(k==="rank")return r.rank; if(k==="dn")return `<a href="#" style="color:inherit" onclick="event.preventDefault();lbGoto('${esc(r.pid)}')">${esc(r.dn)}</a>`; if(k.endsWith("_pct")){const p=k.replace("_pct","");return fmtPct(r[p+"_w"],r[p+"_l"]);} return r[k]; };
+  const cell=(r,k)=>{ if(k==="rank")return r.rank; if(k==="dn"){const _lnk=`<a href="#" style="color:inherit" onclick="event.preventDefault();lbGoto('${esc(r.pid)}')">${esc(r.dn)}</a>`;return r.isTeam?_lnk+' <span style="font-size:9px;letter-spacing:.5px;color:#e6b04a;border:1px solid #e6b04a55;border-radius:3px;padding:1px 4px;vertical-align:middle">TEAM</span>':_lnk;} if(k.endsWith("_pct")){const p=k.replace("_pct","");return fmtPct(r[p+"_w"],r[p+"_l"]);} return r[k]; };
   const body=show.map(r=> r.sep!==undefined ? `<tr><td colspan="${COLS.length}" style="text-align:center;color:var(--dim)">\u2026 ${r.sep} more \u2026</td></tr>` : "<tr>"+COLS.map(c=>`<td class="${c[0]==='dn'?'n':''}" style="text-align:${c[2]}">${cell(r,c[0])}</td>`).join("")+"</tr>").join("");
   const scope=filt?(lbCodeName[filt]||filt):"All teams";
   $("out").innerHTML=`<div class="teamhd">W/L Leaderboard <span style="color:var(--dim);font-size:12px">(${esc(scope)}, ${minLabel}) \u00b7 ${note}</span></div><div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
@@ -665,6 +683,7 @@ window.__lbCareer=async name=>{
 };
 ["lbMin","lbMinRS","lbMinPO","lbTeam","lbCount"].forEach(id=>$(id).addEventListener("change",()=>{if(lbAcc)renderLB();}));
 ["lbFrom","lbTo"].forEach(id=>$(id).addEventListener("change",()=>{lbSeasonList=null;}));
+$("lbInclTeams").addEventListener("change",()=>{if(lbAcc)renderLB();});
 $("wlTeam").addEventListener("change",()=>{syncWlHash();renderPlayerWL();});
 $("wlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
 $("dateGo").onclick=showDate;
