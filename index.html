@@ -116,6 +116,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
   <div class="panel" id="paneLB" style="display:none">
     <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="min-width:200px"><label>Career range of…</label><br><input type="text" id="lbCareer" placeholder="type a player…" autocomplete="off" style="width:100%"><div class="sugbox" id="lbCareerSug"></div></div>
       <div><label>From</label><br><select id="lbFrom"></select></div>
       <div><label>To</label><br><select id="lbTo"></select></div>
       <div><label>Min games</label><br><input type="number" id="lbMin" value="0" min="0" style="width:90px"></div>
@@ -135,7 +136,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v8d · leaderboard: separate Min RS / Min PO game filters · 2026-07-03";
+const EXPLORER_BUILD="v8e · leaderboard: career-range picker (set From/To to a player’s span) · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -615,6 +616,27 @@ $("tabPlayer").onclick=()=>setTab("Player");
 $("tabWL").onclick=()=>setTab("WL");
 $("tabLB").onclick=()=>setTab("LB");
 $("lbGo").onclick=buildLB;
+let lbCareerTimer=null;
+$("lbCareer").addEventListener("input",()=>{
+  clearTimeout(lbCareerTimer);
+  lbCareerTimer=setTimeout(async()=>{
+    const q=$("lbCareer").value.trim().toLowerCase();
+    if(q.length<2){$("lbCareerSug").style.display="none";return;}
+    await playerIndex();
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)||disp(n).toLowerCase().includes(q)).slice(0,30);
+    $("lbCareerSug").innerHTML=hits.map(n=>{const d=disp(n);return `<div onclick="window.__lbCareer('${esc(n).replace(/'/g,"\\'")}')">${esc(d)}${d!==n?` <small style="color:var(--dim)">(${esc(n)})</small>`:""}</div>`;}).join("");
+    $("lbCareerSug").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__lbCareer=async name=>{
+  $("lbCareerSug").style.display="none";
+  const idx=await playerIndex(); const seasons=idx[name];
+  if(!seasons||!seasons.length){ status("no seasons for "+esc(name)); return; }
+  const lo=Math.min(...seasons), hi=Math.max(...seasons);
+  $("lbFrom").value=lo; $("lbTo").value=hi;
+  $("lbCareer").value=disp(name)+" ("+fmtSeason(lo)+" \u2013 "+fmtSeason(hi)+")";
+  buildLB();
+};
 ["lbMin","lbMinRS","lbMinPO","lbTeam","lbCount"].forEach(id=>$(id).addEventListener("change",()=>{if(lbAcc)renderLB();}));
 $("wlTeam").addEventListener("change",()=>{syncWlHash();renderPlayerWL();});
 $("wlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
