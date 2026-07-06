@@ -139,7 +139,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v8i · leaderboard: optional include-teams (rank franchises alongside players) · 2026-07-03";
+const EXPLORER_BUILD="v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -594,7 +594,7 @@ function downloadBarRace(){
   const winsOf=function(e){ return !e?0:(type==="rs"?e.rs:type==="po"?e.po:(e.rs+e.po)); };
   const label=type==="rs"?"Regular Season":type==="po"?"Playoffs":"RS+PO";
   const years=lbSeasons.slice().sort((a,b)=>a-b);
-  const lines=[["Name",...years.map(function(y){return fmtSeason(y);})].map(_csvCell).join(",")];
+  const lines=[["Name",...years].map(_csvCell).join(",")];
   const inclTeams=$("lbInclTeams")&&$("lbInclTeams").checked;
   let n=0;
   for(const pid in lbAcc){
