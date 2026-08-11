@@ -162,7 +162,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v16 \u00b7 HoopsHype spellings on display \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+const EXPLORER_BUILD="v17 \u00b7 a missed season is not a departure \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -877,6 +877,21 @@ function tenureChain(fr){
    It cannot distinguish a player traded in February from one still on the roster,
    which is why the table prints his last game and lets you see it. */
 function tnLive(r){ return ((r.seasons||[]).slice(-1)[0]||0)===tlRows.maxSy; }
+/* Seasons between a stint's last game and the end of the archive. Zero for
+   somebody who played last season. Now that a contracted player is kept whatever
+   his last game was, this is what stops "hasn't played since 2025" from looking
+   identical to "played in May" -- and a large number is worth a second look,
+   because the roster alone cannot tell a long injury from a return. */
+function tnStale(r){ return tlRows.maxSy-((r.seasons||[]).slice(-1)[0]||0); }
+function tnStaleNote(r){
+  const n=tnStale(r);
+  if(n<=0)return "";
+  const miss=n===1?fmtSeason(tlRows.maxSy)
+        :`${fmtSeason(tlRows.maxSy-n+1)}\u2013${fmtSeason(tlRows.maxSy)}`;
+  return ` <small style="color:var(--dim)" title="under contract, but has not appeared`
+    + ` for this franchise since ${esc(r.last_game)} \u2014 an injury, or a return the`
+    + ` box scores cannot see yet">did not play ${miss}</small>`;
+}
 function dayDiff(a,b){
   const d=(Date.parse(b+"T12:00:00Z")-Date.parse(a+"T12:00:00Z"))/86400000;
   return isFinite(d)?Math.round(d):0;
@@ -939,7 +954,7 @@ async function showTenure(){
     rows.forEach((x,i)=>{
       h+=`<tr onclick="tnPick('${esc(x.key)}')" style="cursor:pointer">`
         + `<td>${i+1}</td><td>${esc(x.name)}</td>`
-        + `<td class="n">${esc(pdisp(x.r.personId,x.r.name))}</td>`
+        + `<td class="n">${esc(pdisp(x.r.personId,x.r.name))}${tnStaleNote(x.r)}</td>`
         + `<td>${esc(x.r.first_game)}</td><td>${esc(x.r.last_game)}</td>`
         + `<td style="text-align:right">${yrs(x.days)}</td>`
         + `<td style="text-align:right">${x.days.toLocaleString()}</td></tr>`;
@@ -958,7 +973,7 @@ async function showTenure(){
     h+=`<div class="teamhd">Longest tenured under contract: `
       + `<span style="color:var(--gold)">${esc(pdisp(now.personId,now.name))}</span>`
       + `<small style="color:var(--dim);font-weight:400"> \u00b7 since ${esc(now.first_game)}`
-      + ` \u00b7 ${yrs(d)}</small></div>`;
+      + ` \u00b7 ${yrs(d)}</small>${tnStaleNote(now)}</div>`;
   }else if(!rost.ok){
     h+=`<div class="sub" style="margin:0 2px 10px;color:var(--dim)">Current rosters unavailable`
       + `${rost.err?" ("+esc(rost.err)+")":""} \u2014 the table below is games only, so a player who`
@@ -1165,12 +1180,17 @@ function tnContracted(fr, rost){
     // as tenure, those old spells made them the longest-serving players at
     // franchises they had left years ago.
     //
-    // Two tests, because one is not enough. The stint must reach the latest
-    // season, which rules out a spell that ended seasons ago. And the player must
-    // not have appeared for anyone else since, which catches the case the first
-    // test misses: traded away in February and re-signed in the summer, where the
-    // old stint still touches the latest season.
-    if(!tnLive(r))continue;
+    // ONE TEST, not two: has he played for anybody else since this stint ended?
+    //
+    // Requiring the stint to reach the latest season looked like the same thing
+    // and is not. Kyrie Irving's Dallas stint ends 2025-03-03 because he missed
+    // all of 2025-26 injured -- still under contract, never left, and that test
+    // dropped him in favour of a team-mate who arrived after him.
+    //
+    // The appearance test handles the returning signings on its own, because a
+    // player who leaves plays somewhere: Lillard went to Milwaukee after Portland,
+    // Vucevic to Chicago after Orlando, so both are still excluded. Missing a
+    // season is not evidence of leaving; playing elsewhere is.
     const elsewhere=(tlRows.byPid[pid]||[])
       .some(o=>o.franchise!==fr && o.first_game>r.last_game);
     if(elsewhere)continue;
