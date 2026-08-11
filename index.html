@@ -162,7 +162,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v12 \u00b7 free agents count as gone \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+const EXPLORER_BUILD="v13 \u00b7 Sheet1 names teams by city \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -1010,6 +1010,20 @@ function tnCSV(text){
   if(cell.length||row.length){row.push(cell);rows.push(row);}
   return rows;
 }
+/* Sheet1 names the team by CITY, not by tricode: "Golden State", "LA Lakers",
+   "Oklahoma City". Read as a code it matched nothing, so all thirty franchises
+   fell back to games only and the filter appeared to do nothing at all. This is
+   the Roster Manager's own TEAMS table, copied verbatim so the two agree. */
+const TN_TEAM={};
+for(const [city,code] of Object.entries({
+  'Atlanta':'ATL','Boston':'BOS','Brooklyn':'BKN','Charlotte':'CHA','Chicago':'CHI',
+  'Cleveland':'CLE','Dallas':'DAL','Denver':'DEN','Detroit':'DET','Golden State':'GSW',
+  'Houston':'HOU','Indiana':'IND','LA Clippers':'LAC','LA Lakers':'LAL','Memphis':'MEM',
+  'Miami':'MIA','Milwaukee':'MIL','Minnesota':'MIN','New Orleans':'NOP','New York':'NYK',
+  'Oklahoma City':'OKC','Orlando':'ORL','Philadelphia':'PHI','Phoenix':'PHX','Portland':'POR',
+  'Sacramento':'SAC','San Antonio':'SAS','Toronto':'TOR','Utah':'UTA','Washington':'WAS'
+})) TN_TEAM[city.toUpperCase()]=code;
+
 let _roster=null;
 async function roster(){
   if(_roster)return _roster;
@@ -1026,8 +1040,11 @@ async function roster(){
     const rows=tnCSV(await r.text());
     for(let i=1;i<rows.length;i++){
       const w=rows[i]||[];
-      const hh=(w[0]||"").trim(), team=(w[2]||"").trim().toUpperCase();
-      if(!hh||!team)continue;
+      const hh=(w[0]||"").trim(), raw=(w[2]||"").trim().toUpperCase();
+      if(!hh||!raw)continue;
+      // A city name normally; a tricode is accepted too, in case the sheet ever
+      // changes what it writes there.
+      const team=TN_TEAM[raw]||raw;
       // UNDER CONTRACT, which is not the same as being listed. Sheet1 keeps a
       // free agent under his old team -- that is how the Trade Machine works out
       // his cap hold -- so simply appearing here kept Dwight Powell as Dallas's
