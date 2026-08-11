@@ -73,6 +73,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
     <button id="tabWL">Player W / L</button>
     <button id="tabLB">Leaderboard</button>
     <button id="tabTL">Timeline</button>
+    <button id="tabTN">Longest tenured</button>
   </div>
 
   <div class="panel" id="paneDate">
@@ -146,6 +147,14 @@ table.wl td.n{font-family:'Oswald',sans-serif}
     <div class="sub" style="margin:8px 2px 0">Every franchise a player appeared for, in order, with the exact first and last game he played for each &mdash; playoffs included. A player who left and came back gets a row each time. Click a date to open that box score. This is where he <b>played</b>: a signing who never got off the bench leaves no trace, and a first game can fall well after the trade that caused it.</div>
   </div>
 
+  <div class="panel" id="paneTN" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div><label>Franchise</label><br><select id="tnTeam"><option value="">All teams &mdash; who holds it now</option></select></div>
+      <button class="go" id="tnCsv">&#11015; CSV</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">Who has been at a franchise longest, and every time that title changed hands. Tenure runs from a player's first game with the franchise to his last &mdash; and a player who left and came back counts from the <b>return</b>, not the original arrival. The title only moves when the holder leaves, since nobody who arrived later can outrank him.</div>
+  </div>
+
   <div class="status" id="status"></div>
   <div id="out"></div>
   <div class="note"><span id="buildStamp" style="color:var(--gold)"></span><br>Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> \u00b7 timelines from <code>data/timelines.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
@@ -153,7 +162,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v9 \u00b7 Timeline tab \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+const EXPLORER_BUILD="v10 \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -658,7 +667,7 @@ window.lbGoto=pid=>{
 // ---------- tabs & init ----------
 function setTab(t){
   activeTab=t;
-  for(const x of["Date","Team","Player","WL","LB","TL"]){
+  for(const x of["Date","Team","Player","WL","LB","TL","TN"]){
     $("tab"+x).classList.toggle("on",x===t);
     $("pane"+x).style.display=x===t?"":"none";
   }
@@ -716,10 +725,14 @@ async function timelines(){
   if(!tlRows){
     status("loading timelines\u2026");
     const all=await fetchNDJSON("data/timelines.ndjson");
-    tlRows={byName:{},byPid:{}};
+    tlRows={byName:{},byPid:{},byFr:{},frName:{},maxSy:0};
     for(const r of all){
       (tlRows.byName[r.name]=tlRows.byName[r.name]||[]).push(r);
       (tlRows.byPid[r.personId]=tlRows.byPid[r.personId]||[]).push(r);
+      (tlRows.byFr[r.franchise]=tlRows.byFr[r.franchise]||[]).push(r);
+      tlRows.frName[r.franchise]=r.franchise_name;
+      const ls=(r.seasons||[]).slice(-1)[0]||0;
+      if(ls>tlRows.maxSy)tlRows.maxSy=ls;
     }
     status("");
   }
@@ -775,7 +788,7 @@ async function showTimeline(name){
       const tri=(r.tricodes||[]).filter(x=>x!==r.franchise);
       const notes=[];
       if(tri.length)notes.push(`<span title="tricode in the box scores">${esc((r.tricodes||[]).join(" \u2192 "))}</span>`);
-      if(r.ongoing)notes.push(`<span style="color:var(--gold)">current</span>`);
+      if(tnLive(r))notes.push(`<span style="color:var(--gold)">current</span>`);
       if(r.longest_gap_days>=21)
         notes.push(`<span style="color:var(--dim)" title="longest gap between appearances inside one season, from ${esc(r.longest_gap_from)} \u2014 an injury, a waiver, a late debut \u2014 or a league-wide stoppage, which is what the 142-day gaps in 2019-20 are">${r.longest_gap_days}d gap</span>`);
       h+=`<tr><td>${r.stint}</td><td>${esc(r.franchise_name)}</td>`
@@ -804,6 +817,132 @@ function tlDownload(){
   downloadFile(`timeline_${tlName.replace(/[^A-Za-z0-9]+/g,"_")}.csv`,
                lines.join("\n"),"text/csv;charset=utf-8");
 }
+/* ---------- longest tenured ----------
+   The succession of "who has been here longest" at one franchise.
+
+   The only event that can change it is the HOLDER LEAVING. Anybody who arrives
+   later starts behind him by definition, so no arrival can ever overtake him --
+   which makes this a walk rather than a day-by-day sweep: take the holder, jump
+   to the day he plays his last game, ask who among the players still there
+   arrived earliest, and repeat.
+
+   Tenure runs from the start of the CURRENT stint. A player who left and came
+   back is a separate stint in the file, so the clock restarts at the return
+   without needing a special case here.
+
+   Ties on the arrival date -- common in a franchise's first game, when the whole
+   roster debuts together -- go to whoever ends up staying longer. Picking
+   arbitrarily would hand the title over on day one and read as a bug. */
+function tenureChain(fr){
+  const st=(tlRows.byFr[fr]||[]).slice().sort((a,b)=>
+    a.first_game<b.first_game?-1:a.first_game>b.first_game?1:
+    (a.last_game>b.last_game?-1:a.last_game<b.last_game?1:0));
+  const used=new Set(), chain=[];
+  let t=null;
+  while(true){
+    // Still with the franchise after t, and not already counted.
+    const cand=st.filter(x=>!used.has(x)&&(t===null||x.last_game>t));
+    if(!cand.length)break;
+    // Already arrived by t. If nobody has, the franchise had a gap here, so jump
+    // forward to the next arrival rather than inventing a holder.
+    const here=t===null?cand:cand.filter(x=>x.first_game<=t);
+    const pick=(here.length?here:cand)[0];
+    chain.push({r:pick, from:(t===null||pick.first_game>t)?pick.first_game:t, to:pick.last_game});
+    used.add(pick); t=pick.last_game;
+  }
+  return chain;
+}
+/* Still with the franchise at the end of the archive, judged by SEASON.
+   The file's own ongoing flag asks whether the last game was within ten days of
+   the newest game anywhere -- so on an archive that ends at the Finals, only the
+   two finalists qualified and the other twenty-eight franchises vanished from
+   this table. Reaching the latest season is the question that was meant.
+   It cannot distinguish a player traded in February from one still on the roster,
+   which is why the table prints his last game and lets you see it. */
+function tnLive(r){ return ((r.seasons||[]).slice(-1)[0]||0)===tlRows.maxSy; }
+function dayDiff(a,b){
+  const d=(Date.parse(b+"T12:00:00Z")-Date.parse(a+"T12:00:00Z"))/86400000;
+  return isFinite(d)?Math.round(d):0;
+}
+function yrs(days){
+  const y=Math.floor(days/365.25), m=Math.round((days-y*365.25)/30.44);
+  return y?`${y}y${m?" "+m+"m":""}`:`${m}m`;
+}
+async function showTenure(){
+  setTab("TN");
+  await timelines(); await ensureAliases();
+  const fr=$("tnTeam").value;
+  if(!fr){
+    // Every franchise still active, by how long the current holder has been there.
+    const rows=[];
+    for(const key of Object.keys(tlRows.byFr)){
+      const ch=tlChainCache(key);
+      const last=ch[ch.length-1];
+      // Franchises that played in the latest season. A defunct one has no stint
+      // reaching it, so this drops Anderson and Sheboygan without naming them.
+      if(!last||!(tlRows.byFr[key]||[]).some(tnLive))continue;
+      rows.push({key, name:tlRows.frName[key], r:last.r,
+                 days:dayDiff(last.r.first_game,last.r.last_game)});
+    }
+    rows.sort((a,b)=>b.days-a.days);
+    let h=`<div class="teamhd">Longest-tenured player at each franchise`
+      + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${rows.length} teams`
+      + ` \u00b7 as of ${fmtSeason(tlRows.maxSy)}</small></div>`;
+    h+=`<table><thead><tr><th>#</th><th>Franchise</th><th>Player</th>`
+      + `<th>Since</th><th>Latest game</th><th style="text-align:right">Tenure</th>`
+      + `<th style="text-align:right">Days</th></tr></thead><tbody>`;
+    rows.forEach((x,i)=>{
+      h+=`<tr onclick="tnPick('${esc(x.key)}')" style="cursor:pointer">`
+        + `<td>${i+1}</td><td>${esc(x.name)}</td>`
+        + `<td class="n">${esc(pdisp(x.r.personId,x.r.name))}</td>`
+        + `<td>${esc(x.r.first_game)}</td><td>${esc(x.r.last_game)}</td>`
+        + `<td style="text-align:right">${yrs(x.days)}</td>`
+        + `<td style="text-align:right">${x.days.toLocaleString()}</td></tr>`;
+    });
+    $("out").innerHTML=h+`</tbody></table>`
+      + `<div class="sub" style="margin:8px 2px">Click a row for that franchise's full succession.</div>`;
+    return;
+  }
+  const ch=tlChainCache(fr);
+  let h=`<div class="teamhd">${esc(tlRows.frName[fr]||fr)} \u2014 longest tenured, in succession`
+    + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${ch.length} holder${ch.length!==1?"s":""}</small></div>`;
+  h+=`<table><thead><tr><th>#</th><th>Player</th><th>Took over</th><th>Until</th>`
+    + `<th style="text-align:right">Held</th><th>Arrived</th>`
+    + `<th style="text-align:right">Tenure at exit</th>`
+    + `<th style="text-align:right">Reg</th><th style="text-align:right">PO</th></tr></thead><tbody>`;
+  ch.slice().reverse().forEach((c,i)=>{
+    const n=ch.length-i;
+    const held=dayDiff(c.from,c.to), ten=dayDiff(c.r.first_game,c.r.last_game);
+    // "Arrived" repeats the date only when it differs from the handover -- which
+    // is the interesting case: he was already there, waiting his turn.
+    const arrived=c.r.first_game===c.from?"\u2014":c.r.first_game;
+    h+=`<tr><td>${n}</td>`
+      + `<td class="n"><a href="#" style="color:inherit" onclick="event.preventDefault();showTimeline('${esc(c.r.name).replace(/'/g,"\\'")}')">${esc(pdisp(c.r.personId,c.r.name))}</a></td>`
+      + `<td>${esc(c.from)}</td>`
+      + `<td>${tnLive(c.r)?'<span style="color:var(--gold)">current</span>':esc(c.to)}</td>`
+      + `<td style="text-align:right">${yrs(held)}</td>`
+      + `<td>${esc(arrived)}</td>`
+      + `<td style="text-align:right">${yrs(ten)}</td>`
+      + `<td style="text-align:right">${c.r.gp_regular??"\u2014"}</td>`
+      + `<td style="text-align:right">${c.r.gp_playoff??"\u2014"}</td></tr>`;
+  });
+  $("out").innerHTML=h+`</tbody></table>`;
+}
+const _tnCache={};
+function tlChainCache(fr){ return _tnCache[fr]||(_tnCache[fr]=tenureChain(fr)); }
+function tnPick(fr){ $("tnTeam").value=fr; showTenure(); }
+function tnDownload(){
+  const fr=$("tnTeam").value; if(!fr||!tlRows)return;
+  const cols=["seq","player","personId","took_over","until","days_held",
+              "arrived","tenure_days","gp_regular","gp_playoff"];
+  const lines=[cols.join(",")];
+  tlChainCache(fr).forEach((c,i)=>lines.push([i+1,pdisp(c.r.personId,c.r.name),
+    c.r.personId,c.from,c.to,dayDiff(c.from,c.to),c.r.first_game,
+    dayDiff(c.r.first_game,c.r.last_game),c.r.gp_regular,c.r.gp_playoff]
+    .map(_csvCell).join(",")));
+  downloadFile(`tenure_${fr}.csv`,lines.join("\n"),"text/csv;charset=utf-8");
+}
+
 let tlTimer=null;
 $("tlPlayer").addEventListener("input",()=>{
   clearTimeout(tlTimer);
@@ -818,6 +957,20 @@ $("tlPlayer").addEventListener("input",()=>{
 });
 window.__tlpick=name=>{$("tlSug").style.display="none";showTimeline(name)};
 $("tabTL").onclick=()=>setTab("TL");
+$("tabTN").onclick=async()=>{
+  setTab("TN");
+  if(!$("tnTeam").dataset.filled){
+    await timelines();
+    const keys=Object.keys(tlRows.byFr)
+      .sort((a,b)=>(tlRows.frName[a]||a).localeCompare(tlRows.frName[b]||b));
+    $("tnTeam").innerHTML=`<option value="">All teams \u2014 who holds it now</option>`
+      + keys.map(k=>`<option value="${esc(k)}">${esc(tlRows.frName[k]||k)}</option>`).join("");
+    $("tnTeam").dataset.filled="1";
+  }
+  showTenure();
+};
+$("tnTeam").addEventListener("change",showTenure);
+$("tnCsv").onclick=tnDownload;
 $("tlCsv").onclick=tlDownload;
 $("tlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
 
