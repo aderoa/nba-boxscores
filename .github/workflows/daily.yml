@@ -28,7 +28,22 @@ jobs:
       - name: Run updater
         run: python scripts/update_boxscores.py
 
+      # Rebuilt from the whole archive every run, not appended to. A stint's last
+      # game moves when a player plays again and its first game moves when a fix
+      # lands in an old season, so there is nothing to append to -- and the whole
+      # pass is about a minute against eighty seasons, which is cheaper than
+      # working out what changed.
+      # ALWAYS, even when the updater above failed. The timelines are derived
+      # from the seasons already committed here and touch no network, so a fetch
+      # failure upstream is no reason to skip them -- and while cdn.nba.com is
+      # answering 403 to Actions runners, "the updater failed" is the normal case.
+      # The job still reports failure, so the 403 does not go quiet.
+      - name: Build player timelines
+        if: always()
+        run: python scripts/build_timelines.py
+
       - name: Commit & push if changed
+        if: always()
         run: |
           git config user.name "boxscore-bot"
           git config user.email "actions@users.noreply.github.com"
@@ -36,6 +51,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "Box scores through $(date -u +%F)"
+            git commit -m "Update $(date -u +%F): $(git diff --cached --name-only | wc -l) file(s)"
             git push
           fi
