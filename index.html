@@ -162,7 +162,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v14 \u00b7 returning signings start from zero \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+const EXPLORER_BUILD="v16 \u00b7 HoopsHype spellings on display \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -202,8 +202,21 @@ async function playerIndex(){
   }
   return cache.idx;
 }
-// stats name -> HoopsHype display name (identity fallback)
-function disp(n){return (cache.pn&&cache.pn[n])||n}
+/* stats name -> HoopsHype display name.
+
+   Three sources, strongest first: player_names.json, which this page already
+   shipped with; then the Worker's live "HM Codes" dictionary, which is where new
+   rookies and corrections land without a redeploy; then the name unchanged.
+
+   This is what puts the diacritics on screen. The box scores spell him "Nikola
+   Jokic" because that is what NBA.com sends; HoopsHype spells him "Nikola
+   Joki\u0107", and that is the nomenclature the rest of the platform uses. */
+function disp(n){
+  if(!n)return n;
+  if(cache.pn&&cache.pn[n])return cache.pn[n];
+  const d=DICT_DISP[nkey(n)];
+  return d||n;
+}
 async function teamCodes(){
   if(cache.tc===undefined){
     try{
@@ -724,6 +737,10 @@ let tlName="", tlRows=null;
 async function timelines(){
   if(!tlRows){
     status("loading timelines\u2026");
+    // Awaited, not raced: init() kicks this off but a quick click could beat it,
+    // and a table that renders the flat spellings then never corrects itself is
+    // worse than waiting a moment for the right ones.
+    await nameDict();
     const all=await fetchNDJSON("data/timelines.ndjson");
     tlRows={byName:{},byPid:{},byFr:{},frName:{},maxSy:0};
     for(const r of all){
@@ -941,39 +958,52 @@ async function showTenure(){
     h+=`<div class="teamhd">Longest tenured under contract: `
       + `<span style="color:var(--gold)">${esc(pdisp(now.personId,now.name))}</span>`
       + `<small style="color:var(--dim);font-weight:400"> \u00b7 since ${esc(now.first_game)}`
-      + ` \u00b7 ${yrs(d)}${same?"":" \u00b7 the games-only holder below is no longer under contract here"}`
-      + `</small></div>`;
+      + ` \u00b7 ${yrs(d)}</small></div>`;
   }else if(!rost.ok){
     h+=`<div class="sub" style="margin:0 2px 10px;color:var(--dim)">Current rosters unavailable`
       + `${rost.err?" ("+esc(rost.err)+")":""} \u2014 the table below is games only, so a player who`
       + ` signed elsewhere this offseason still appears as the holder.</div>`;
   }
+  // THE TABLE GETS THE HANDOVER TOO. The chain from games alone stops at Dean
+  // Wade, because a box score cannot see him signing elsewhere. When the roster
+  // says the title has moved, that is a real succession event and belongs in the
+  // list -- taking over on the departing holder's last game, since that is the
+  // last day he was demonstrably there. It has no end date: he holds it now.
+  const rows=ch.slice();
+  if(now&&rows.length&&rows[rows.length-1].r.personId!==now.personId)
+    rows.push({r:now, from:rows[rows.length-1].to, to:null, viaContract:true});
   h+=`<div class="teamhd">${esc(tlRows.frName[fr]||fr)} \u2014 longest tenured, in succession`
-    + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${ch.length} holder${ch.length!==1?"s":""}</small></div>`;
+    + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${rows.length} holder${rows.length!==1?"s":""}</small></div>`;
   h+=`<table><thead><tr><th>#</th><th>Player</th><th>Took over</th><th>Until</th>`
     + `<th style="text-align:right">Held</th><th>Arrived</th>`
     + `<th style="text-align:right">Tenure at exit</th>`
     + `<th style="text-align:right">Reg</th><th style="text-align:right">PO</th></tr></thead><tbody>`;
-  ch.slice().reverse().forEach((c,i)=>{
-    const n=ch.length-i;
+  rows.slice().reverse().forEach((c,i)=>{
+    const n=rows.length-i;
     // ONLY THE LAST HOLDER CAN BE CURRENT. Reaching the latest season is not
     // enough: a holder who was succeeded left, by definition -- that is what
     // moved the title -- so anyone with a successor gets the date he actually
     // last played. Garland read as "current" while also handing over in January.
     const isLast=i===0;
-    const held=dayDiff(c.from,c.to), ten=dayDiff(c.r.first_game,c.r.last_game);
+    // Succeeded by a contract handover rather than by a game: he is the one who
+    // left, and the row below him is the man who replaced him.
+    const lostToContract=!c.viaContract&&i===1&&rows[rows.length-1].viaContract;
+    // An open reign is measured to the last game he played, not to today: this
+    // whole table is built from games, and the offseason has none.
+    const held=dayDiff(c.from,c.to||c.r.last_game);
+    const ten=dayDiff(c.r.first_game,c.r.last_game);
     // "Arrived" repeats the date only when it differs from the handover -- which
     // is the interesting case: he was already there, waiting his turn.
     const arrived=c.r.first_game===c.from?"\u2014":c.r.first_game;
     h+=`<tr><td>${n}</td>`
       + `<td class="n"><a href="#" style="color:inherit" onclick="event.preventDefault();showTimeline('${esc(c.r.name).replace(/'/g,"\\'")}')">${esc(pdisp(c.r.personId,c.r.name))}</a></td>`
       + `<td>${esc(c.from)}</td>`
-      + `<td>${isLast&&tnLive(c.r)
-            ? (now&&now.personId===c.r.personId
-                ? '<span style="color:var(--gold)">current</span>'
-                : esc(c.to)+(rost.ok?' <small style="color:var(--dim)">left</small>':''))
-            : esc(c.to)}</td>`
-      + `<td style="text-align:right">${yrs(held)}</td>`
+      + `<td>${c.to===null||(isLast&&tnLive(c.r)&&now&&now.personId===c.r.personId)
+            ? '<span style="color:var(--gold)">current</span>'
+            : esc(c.to)+((lostToContract||(isLast&&rost.ok&&tnLive(c.r)))?' <small style="color:var(--dim)">left</small>':'')}</td>`
+      + `<td style="text-align:right">${c.viaContract&&held<=0
+            ? `<span style="color:var(--dim)" title="the title passed in the offseason, so no games have been played under it yet">\u2014</span>`
+            : yrs(held)}</td>`
       + `<td>${esc(arrived)}</td>`
       + `<td style="text-align:right">${yrs(ten)}</td>`
       + `<td style="text-align:right">${c.r.gp_regular??"\u2014"}</td>`
@@ -1021,11 +1051,56 @@ for(const [city,code] of Object.entries({
   'Sacramento':'SAC','San Antonio':'SAS','Toronto':'TOR','Utah':'UTA','Washington':'WAS'
 })) TN_TEAM[city.toUpperCase()]=code;
 
+/* One key per player, so spelling differences stop hiding people.
+
+   Diacritics are the common case: the box scores say "Nikola Jokic", the sheet
+   says "Nikola Joki\u0107", and a straight comparison makes them two men. Folding
+   accents, case, punctuation and the Jr/Sr/II/III suffixes catches almost all of
+   it without a lookup table.
+
+   What folding cannot fix is genuine nomenclature -- "Cam" against "Cameron",
+   a legal name against a preferred one. That is what the Worker's dictionary is
+   for, the same "HM Codes" tab the sheet-proxy endpoints already translate
+   through, now readable at /api/name-dict. */
+function nkey(n){
+  return String(n||"")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g,"")   // e -> e, c -> c
+    .toLowerCase()
+    .replace(/\b(jr|sr|ii|iii|iv|v)\b/g,"")
+    .replace(/[^a-z]/g,"");
+}
+let _nameDict=null;
+// The HH SPELLING itself, for display. The folded map above answers "are these
+// the same player"; this one answers "what should be on screen", which needs the
+// accents and the preferred first name kept intact -- Nikola Joki\u0107, not
+// nikolajokic. Keyed on the folded NBA name so a near-miss still resolves.
+const DICT_DISP={};
+async function nameDict(){
+  if(_nameDict)return _nameDict;
+  _nameDict={};
+  try{
+    const r=await fetch("https://hoopsmatic.com/api/name-dict",{cache:"no-cache"});
+    if(r.ok){
+      const raw=await r.json();
+      // Keyed both ways on folded keys: the roster is HH-spelled and the box
+      // scores are NBA-spelled, and either side may be the one that differs.
+      for(const nba in raw){
+        _nameDict[nkey(nba)]=nkey(raw[nba]);
+        _nameDict[nkey(raw[nba])]=nkey(nba);
+        DICT_DISP[nkey(nba)]=raw[nba];
+        DICT_DISP[nkey(raw[nba])]=raw[nba];   // already-HH spellings resolve too
+      }
+    }
+  }catch(e){}
+  return _nameDict;
+}
+
 let _roster=null;
 async function roster(){
   if(_roster)return _roster;
   _roster={byTeam:{}, ok:false, err:"", n:0, fa:0};
   try{
+    const dict=await nameDict();
     let rev={};
     try{
       const rr=await fetch("data/player_names_reverse.json",{cache:"no-cache"});
@@ -1052,9 +1127,15 @@ async function roster(){
       // because a contractual tie is a tie.
       const sal27=(w[6]||"").replace(/[^0-9.]/g,""), st27=(w[8]||"").trim();
       if(!(parseFloat(sal27)>0)&&!st27){ _roster.fa++; continue; }
-      const nm=rev[hh]||hh;
-      (_roster.byTeam[team]=_roster.byTeam[team]||new Set()).add(nm);
-      (_roster.byTeam[team]).add(hh);        // in case the box scores agree already
+      const set=(_roster.byTeam[team]=_roster.byTeam[team]||new Set());
+      // Every spelling this player might carry, folded: the sheet's own, the
+      // reverse-name file's, and whatever the dictionary maps it to.
+      for(const cand of [hh, rev[hh]]){
+        if(!cand)continue;
+        const k=nkey(cand);
+        set.add(k);
+        if(dict[k])set.add(dict[k]);
+      }
       _roster.n++;
     }
     _roster.ok=true;
@@ -1071,7 +1152,7 @@ function tnContracted(fr, rost){
   if(!have||!have.size)return null;
   const best={};
   for(const r of (tlRows.byFr[fr]||[])){
-    if(!have.has(r.name))continue;
+    if(!have.has(nkey(r.name)))continue;
     const cur=best[r.personId];
     if(!cur||r.first_game>cur.first_game)best[r.personId]=r;   // latest stint
   }
@@ -1107,13 +1188,19 @@ function tnContracted(fr, rost){
 const _tnCache={};
 function tlChainCache(fr){ return _tnCache[fr]||(_tnCache[fr]=tenureChain(fr)); }
 function tnPick(fr){ $("tnTeam").value=fr; showTenure(); }
-function tnDownload(){
+async function tnDownload(){
   const fr=$("tnTeam").value; if(!fr||!tlRows)return;
+  const rost=await roster();
+  const now=rost.ok?tnContracted(fr,rost):null;
   const cols=["seq","player","personId","took_over","until","days_held",
               "arrived","tenure_days","gp_regular","gp_playoff"];
   const lines=[cols.join(",")];
-  tlChainCache(fr).forEach((c,i)=>lines.push([i+1,pdisp(c.r.personId,c.r.name),
-    c.r.personId,c.from,c.to,dayDiff(c.from,c.to),c.r.first_game,
+  const ch=tlChainCache(fr).slice();
+  if(now&&ch.length&&ch[ch.length-1].r.personId!==now.personId)
+    ch.push({r:now, from:ch[ch.length-1].to, to:null});
+  ch.forEach((c,i)=>lines.push([i+1,pdisp(c.r.personId,c.r.name),
+    c.r.personId,c.from,c.to===null?"current":c.to,
+    dayDiff(c.from,c.to||c.r.last_game),c.r.first_game,
     dayDiff(c.r.first_game,c.r.last_game),c.r.gp_regular,c.r.gp_playoff]
     .map(_csvCell).join(",")));
   downloadFile(`tenure_${fr}.csv`,lines.join("\n"),"text/csv;charset=utf-8");
@@ -1158,6 +1245,11 @@ $("tlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(loca
   $("lbFrom").value=FIRST_SY;$("lbTo").value=LAST_SY;
   const y=new Date();y.setDate(y.getDate()-1);
   $("dateInput").value=y.toISOString().slice(0,10);
+  // Fetched at start, not on demand: disp() is synchronous and used by every
+  // tab, so the spellings need to be in hand before anything renders. Not
+  // awaited -- a slow or unreachable Worker must not hold up the page, and the
+  // only cost of losing the race is NBA spellings until the next render.
+  nameDict();
   fillTeams();
   onWlHash();
   // #tl=Name opens a timeline directly, the same way #wl= already works.
