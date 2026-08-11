@@ -1,535 +1,1115 @@
-#!/usr/bin/env python3
-"""
-Player timelines from box scores: every franchise a player appeared for, in
-order, with the exact first and last game he played for each.
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NBA Box Score Database — Explorer</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0b1a;--panel:#14142b;--panel2:#1b1b36;--line:#2a2a4d;--tx:#e8e8f4;--dim:#8a8ab0;--gold:#ffd24d;--acc:#ff5a36;--green:#34d97a}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px;min-height:100vh}
+.wrap{max-width:1060px;margin:0 auto;padding:22px 16px 60px}
+h1{font-family:'Oswald',sans-serif;font-size:26px;letter-spacing:2px;text-transform:uppercase}
+h1 b{color:var(--gold)}
+.sub{color:var(--dim);margin:4px 0 18px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tabs button{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:1.5px;text-transform:uppercase;background:var(--panel);color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:9px 18px;cursor:pointer}
+.tabs button.on{color:var(--gold);border-color:var(--gold)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+input,select{background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--tx);font-family:inherit;font-size:13px;padding:8px 10px}
+input:focus,select:focus{outline:none;border-color:var(--gold)}
+button.go{font-family:'Oswald',sans-serif;letter-spacing:1px;text-transform:uppercase;background:var(--gold);color:#1a1400;border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer}
+.status{color:var(--dim);margin:8px 2px}
+.glist{display:flex;flex-direction:column;gap:8px}
+.gcard{display:flex;justify-content:space-between;gap:10px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 14px;cursor:pointer}
+.gcard:hover{border-color:var(--gold)}
+.gcard .sc{font-family:'Oswald',sans-serif;font-size:16px}
+.gcard .sc b{color:var(--gold)}
+.gcard small{color:var(--dim)}
+table{width:100%;border-collapse:collapse;margin-top:8px}
+th,td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+th{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+td:first-child,th:first-child{text-align:left}
+tr.tot td{color:var(--gold);font-weight:600;border-top:2px solid var(--line)}
+.teamhd{font-family:'Oswald',sans-serif;font-size:17px;letter-spacing:1px;margin:18px 0 2px}
+.teamhd b{color:var(--gold)}
+.suggest{position:relative}
+.sugbox{position:absolute;top:100%;left:0;right:0;z-index:5;background:var(--panel2);border:1px solid var(--line);border-radius:8px;max-height:240px;overflow:auto;display:none}
+.sugbox div{padding:7px 10px;cursor:pointer}
+.sugbox div:hover{background:var(--line)}
+.pill{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:5px 12px;margin:3px 4px 0 0;cursor:pointer}
+.pill:hover{border-color:var(--gold)}
+.bk{color:var(--dim);cursor:pointer;margin-bottom:10px;display:inline-block}
+.bk:hover{color:var(--gold)}
+.note{color:var(--dim);font-size:11px;margin-top:10px}
+@media(max-width:700px){th,td{padding:5px 5px;font-size:11px}}
+table.wl{border-collapse:collapse;width:100%;font-size:12px}
+table.wl th,table.wl td{padding:5px 9px;border-bottom:1px solid var(--line);white-space:nowrap}
+table.wl th{color:var(--dim);text-transform:uppercase;letter-spacing:1px;font-size:10px;cursor:pointer;user-select:none}
+table.wl th:hover{color:var(--gold)}
+table.wl tbody tr{cursor:pointer}
+table.wl tbody tr:hover{background:var(--panel2)}
+table.wl tr.sel{background:rgba(255,210,77,.12)}
+table.wl td.n{font-family:'Oswald',sans-serif}
+.wlcards{display:flex;gap:12px;flex-wrap:wrap;margin:6px 0 14px}
+.wlcard{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:12px 18px;min-width:150px}
+.wlcard .lab{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:1px}
+.wlcard .big{font-family:'Oswald',sans-serif;font-size:26px;letter-spacing:1px;margin-top:2px}
+.wlcard .pct{color:var(--gold);font-family:'JetBrains Mono',monospace;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NBA <b>Box Score Database</b></h1>
+  <div class="sub">Every game since 1946-47 · updated daily</div>
 
-    python scripts/build_timelines.py
-    python scripts/build_timelines.py --player "LeBron James"      # spot check
-    python scripts/build_timelines.py --player 2544 --verbose
+  <div class="tabs">
+    <button id="tabDate" class="on">By date</button>
+    <button id="tabTeam">By team</button>
+    <button id="tabPlayer">By player</button>
+    <button id="tabWL">Player W / L</button>
+    <button id="tabLB">Leaderboard</button>
+    <button id="tabTL">Timeline</button>
+    <button id="tabTN">Longest tenured</button>
+  </div>
 
-Reads   data/{season}/boxscores.ndjson   (dates joined from games.ndjson if the
-                                          box score rows do not carry one)
-Writes  data/timelines.ndjson            one line per stint
+  <div class="panel" id="paneDate">
+    <div class="row">
+      <label>Game date</label>
+      <input type="date" id="dateInput" value="">
+      <button class="go" id="dateGo">Show games</button>
+    </div>
+  </div>
 
-WHAT A STINT IS, AND WHAT IT IS NOT
+  <div class="panel" id="paneTeam" style="display:none">
+    <div class="row">
+      <label>Season</label><select id="teamSeason"></select>
+      <label>Team</label><select id="teamSel"><option>load a season…</option></select>
+      <button class="go" id="teamGo">Show games</button>
+    </div>
+  </div>
 
-A stint is a contiguous run of appearances for one franchise. Sorted by date and
-walked in order, so a player who leaves and comes back gets two rows: LeBron
-James is Cleveland, Miami, Cleveland, Los Angeles -- four stints, three
-franchises. Grouping by team instead of by run would silently merge the two
-Cleveland spells into one and report him as a Cavalier from 2003 to 2018.
+  <div class="panel" id="panePlayer" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="flex:1;min-width:240px">
+        <label>Player</label><br>
+        <input type="text" id="playerInput" placeholder="start typing a name…" style="width:100%" autocomplete="off">
+        <div class="sugbox" id="sugbox"></div>
+      </div>
+    </div>
+    <div id="playerSeasons"></div>
+  </div>
 
-It is where a player PLAYED, not where he was under contract. Box scores only
-contain players who appeared, so a ten-day signing who never got off the bench
-leaves no trace, and a stint's first date is a debut, which can fall well after
-the trade that caused it. The fields are named first_game and last_game rather
-than from and to for that reason.
+  <div class="panel" id="paneWL" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="flex:1;min-width:240px">
+        <label>Player</label><br>
+        <input type="text" id="wlPlayer" placeholder="start typing a name…" style="width:100%" autocomplete="off">
+        <div class="sugbox" id="wlSug"></div>
+      </div>
+      <div><label>Team</label><br><select id="wlTeam"><option value="">All teams</option></select></div>
+      <button class="go" id="wlCopy">🔗 Link</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">A player's win/loss record — Regular Season, Playoffs and combined, with win %. Filter by team to see their record with each franchise. Click a column to sort; the address bar becomes a shareable link.</div>
+  </div>
 
-A gap inside a stint is NOT a break. Nothing in a box score distinguishes a
-waiver from an injury, a G-League assignment or a fortnight of DNP-CD, so a
-same-franchise gap cannot be split on without inventing a contract event that
-may not exist. Instead the longest gap is recorded per stint, so a suspicious
-hole is something to go and look at. The transaction database is the right
-source for the contract-level version of this question.
-"""
+  <div class="panel" id="paneLB" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="min-width:200px"><label>Career range of…</label><br><input type="text" id="lbCareer" placeholder="type a player…" autocomplete="off" style="width:100%"><div class="sugbox" id="lbCareerSug"></div></div>
+      <div><label>From</label><br><select id="lbFrom"></select></div>
+      <div><label>To</label><br><select id="lbTo"></select></div>
+      <div><label>Min games</label><br><input type="number" id="lbMin" value="0" min="0" style="width:90px"></div>
+      <div><label>Min RS</label><br><input type="number" id="lbMinRS" value="0" min="0" style="width:80px"></div>
+      <div><label>Min PO</label><br><input type="number" id="lbMinPO" value="0" min="0" style="width:80px"></div>
+      <div><label>Team</label><br><select id="lbTeam"><option value="">All teams</option></select></div>
+      <div><label>Show rows</label><br><input type="number" id="lbCount" value="100" min="2" style="width:90px"></div>
+      <div><label title="Rank franchises alongside players">Include teams</label><br><input type="checkbox" id="lbInclTeams" style="margin-top:8px;transform:scale(1.2)"></div>
+      <button class="go" id="lbGo">Build leaderboard</button>
+      <div><label>Race type</label><br><select id="lbRaceType"><option value="tot">RS + PO</option><option value="rs">RS only</option><option value="po">PO only</option></select></div>
+      <button class="go" id="lbBarRace" title="Cumulative wins per season — for a bar chart race">⬇ Bar race CSV</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">Every player's W/L over the season range, sortable. Set <b>Min games</b> to qualify. Sort descending for the top, ascending for the bottom — and when the list is long it shows both ends. Team filter = record with that franchise. Click a player to open their full W/L. (All-time = wide range; loads box scores per season, so start narrow.)</div>
+  </div>
 
-import os
-import re
-import csv
-import sys
-import json
-import glob
-import argparse
-import collections
+  <div class="panel" id="paneTL" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="flex:1;min-width:240px">
+        <label>Player</label><br>
+        <input type="text" id="tlPlayer" placeholder="start typing a name…" style="width:100%" autocomplete="off">
+        <div class="sugbox" id="tlSug"></div>
+      </div>
+      <button class="go" id="tlCopy">🔗 Link</button>
+      <button class="go" id="tlCsv">⬇ CSV</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">Every franchise a player appeared for, in order, with the exact first and last game he played for each &mdash; playoffs included. A player who left and came back gets a row each time. Click a date to open that box score. This is where he <b>played</b>: a signing who never got off the bench leaves no trace, and a first game can fall well after the trade that caused it.</div>
+  </div>
 
-VERSION = "v1.1.0-ongoing-season"
+  <div class="panel" id="paneTN" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div><label>Franchise</label><br><select id="tnTeam"><option value="">All teams &mdash; who holds it now</option></select></div>
+      <button class="go" id="tnCsv">&#11015; CSV</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">Who has been at a franchise longest, and every time that title changed hands. Tenure runs from a player's first game with the franchise to his last &mdash; and a player who left and came back counts from the <b>return</b>, not the original arrival. The title only moves when the holder leaves, since nobody who arrived later can outrank him.</div>
+  </div>
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, "data")
-OUT = os.path.join(DATA, "timelines.ndjson")
+  <div class="status" id="status"></div>
+  <div id="out"></div>
+  <div class="note"><span id="buildStamp" style="color:var(--gold)"></span><br>Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> \u00b7 timelines from <code>data/timelines.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
+</div>
 
-# --------------------------------------------------------------- game types
-#
-# From the game id prefix, which is the only reliable discriminator -- a date
-# cannot tell a play-in game from a regular season one, and the schedule's own
-# labels have changed wording between seasons.
-#
-# All-Star is the one that must not slip through: it would appear as a one-game
-# stint for a franchise that does not exist.
-GAME_TYPE = {
-    "001": "preseason",
-    "002": "regular",
-    "003": "allstar",
-    "004": "playoff",
-    "005": "playin",
-    "006": "cup",          # NBA Cup final, which counts for neither side
+<script>
+"use strict";
+const EXPLORER_BUILD="v11 \u00b7 tenure vs current contracts \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+console.log("[EXPLORER]",EXPLORER_BUILD);
+const $=id=>document.getElementById(id);
+const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
+const cache={games:{},box:{},idx:null};
+let activeTab="Date";
+
+// ---------- data loading ----------
+async function fetchNDJSON(path){
+  const r=await fetch(path,{cache:"no-cache"});
+  if(!r.ok)throw new Error(path+" -> HTTP "+r.status);
+  const t=await r.text(),out=[];
+  for(const line of t.split("\n")){const s=line.trim();if(!s)continue;try{out.push(JSON.parse(s))}catch(e){}}
+  return out;
 }
-COUNTED = {"regular", "playoff", "playin", "cup"}
-
-# --------------------------------------------------------------- franchises
-#
-# Tricode -> (franchise key, franchise name). One franchise across relocations
-# and renames, so Seattle and Oklahoma City are one stint for Kevin Durant and
-# New Jersey and Brooklyn are one for Brook Lopez.
-#
-# TWO DELIBERATE JUDGMENTS HERE, both of which the data cannot settle:
-#
-#   CHH (Charlotte Hornets, 1988-2002) maps to CHARLOTTE, not to New Orleans,
-#   following the NBA's own reassignment of that history to the current Hornets.
-#   So a player on CHH in 2001 and NOH in 2003 gets two stints, even though the
-#   team he was on physically moved.
-#
-#   PHO and PHX are the same franchise appearing under two codes in different
-#   feeds. Not a relocation at all -- just an inconsistency that would otherwise
-#   split a Suns career in half.
-# The repo's OWN tricode table is the authority for normalising codes, loaded at
-# run time from data/team_codes.json rather than duplicated here. It already
-# carries the relocations (SEA->OKC, NJN->BKN, VAN->MEM, CHH->CHA, NOH->NOP) and
-# an era rule for BLT, which was two different franchises sharing one code -- a
-# flat dict cannot express that and would silently merge them. Everything below
-# only supplies DISPLAY NAMES for the normalised codes, plus the handful of codes
-# team_codes.json does not mention because they never needed translating.
-TEAM_CODES = {}
-
-
-def load_team_codes():
-    """-> ({simple}, {code: [rules]}). Absent file is not fatal, but is reported."""
-    path = os.path.join(DATA, "team_codes.json")
-    if not os.path.exists(path):
-        print("  !! no data/team_codes.json -- tricodes will NOT be normalised,"
-              " so relocations will split into separate stints")
-        return {}, {}
-    with open(path, encoding="utf-8") as f:
-        j = json.load(f)
-    return j.get("simple", {}), j.get("era", {})
-
-
-def normalise(tri, season):
-    """
-    One franchise code, applying the repo's era rules before its simple map.
-
-    Era first: BLT is BAL up to 1955 and WAS from 1963, and a simple lookup would
-    answer one of those for both.
-    """
-    simple, era = TEAM_CODES.get("simple", {}), TEAM_CODES.get("era", {})
-    if tri in era:
-        for rule in era[tri]:
-            lo, hi = rule.get("minYear"), rule.get("maxYear")
-            if (lo is None or season >= lo) and (hi is None or season <= hi):
-                tri = rule["code"]
-                break
-    return simple.get(tri, tri)
-
-
-FRANCHISE = {}
-
-
-def _f(key, name, *codes):
-    for c in codes:
-        FRANCHISE[c] = (key, name)
-
-
-_f("ATL", "Atlanta Hawks", "ATL", "STL", "MLH", "TRI")
-_f("BOS", "Boston Celtics", "BOS")
-_f("BKN", "Brooklyn Nets", "BKN", "BRK", "NJN", "NYN", "NYA")
-_f("CHA", "Charlotte Hornets", "CHA", "CHO", "CHH")
-_f("CHI", "Chicago Bulls", "CHI")
-_f("CLE", "Cleveland Cavaliers", "CLE")
-_f("DAL", "Dallas Mavericks", "DAL")
-_f("DEN", "Denver Nuggets", "DEN", "DNA", "DNR")
-_f("DET", "Detroit Pistons", "DET", "FTW")
-_f("GSW", "Golden State Warriors", "GSW", "GS", "SFW", "PHW")
-_f("HOU", "Houston Rockets", "HOU", "SDR")
-_f("IND", "Indiana Pacers", "IND", "INA")
-_f("LAC", "Los Angeles Clippers", "LAC", "SDC", "BUF")
-_f("LAL", "Los Angeles Lakers", "LAL", "MNL")
-_f("MEM", "Memphis Grizzlies", "MEM", "VAN")
-_f("MIA", "Miami Heat", "MIA")
-_f("MIL", "Milwaukee Bucks", "MIL")
-_f("MIN", "Minnesota Timberwolves", "MIN")
-_f("NOP", "New Orleans Pelicans", "NOP", "NOH", "NOK")
-_f("NYK", "New York Knicks", "NYK", "NY")
-_f("OKC", "Oklahoma City Thunder", "OKC", "SEA")
-_f("ORL", "Orlando Magic", "ORL")
-_f("PHI", "Philadelphia 76ers", "PHI", "SYR")
-_f("PHX", "Phoenix Suns", "PHX", "PHO")
-_f("POR", "Portland Trail Blazers", "POR")
-_f("SAC", "Sacramento Kings", "SAC", "KCK", "KCO", "CIN", "ROC")
-_f("SAS", "San Antonio Spurs", "SAS", "SA", "DLC", "TEX")
-_f("TOR", "Toronto Raptors", "TOR")
-_f("UTA", "Utah Jazz", "UTA", "UTH", "NOJ")
-_f("WAS", "Washington Wizards", "WAS", "WSB", "CAP", "BAL", "CHZ", "CHP")
-
-# DEFUNCT, with no modern successor. Named rather than left as bare codes, since a
-# stint reading "AND" is indistinguishable from a bug -- and folding them into a
-# surviving franchise would be worse: these teams died, they did not move.
-_f("AND", "Anderson Packers", "AND")
-_f("CHS", "Chicago Stags", "CHS")
-_f("INO", "Indianapolis Olympians", "INO")
-_f("SHE", "Sheboygan Red Skins", "SHE")
-_f("WAT", "Waterloo Hawks", "WAT")
-_f("STB", "St. Louis Bombers", "STB")
-_f("PIT", "Pittsburgh Ironmen", "PIT")
-_f("CLR", "Cleveland Rebels", "CLR")
-_f("DTF", "Detroit Falcons", "DTF")
-_f("TRH", "Toronto Huskies", "TRH")
-_f("PRO", "Providence Steamrollers", "PRO")
-_f("WSC", "Washington Capitols", "WSC")
-
-# --------------------------------------------------------- field detection
-#
-# The archive's own field names rather than an assumed schema: this reads files
-# written by a different script, and guessing wrong would either crash or, worse,
-# silently read the wrong column. Detected from the first row and PRINTED, so a
-# schema change shows up as a line of output instead of a wrong answer.
-CANDIDATES = {
-    "pid":  ["personId", "person_id", "playerId", "player_id", "pid"],
-    "name": ["name", "playerName", "player_name", "fullName", "player"],
-    "team": ["team", "teamTricode", "tricode", "teamAbbrev", "team_abbrev",
-             "teamAbbreviation", "tri", "team_tricode"],
-    "gid":  ["gameId", "game_id", "gid"],
-    "date": ["date", "gameDate", "game_date", "gameDateEst", "gameDateEast"],
-    "min":  ["min", "minutes", "mins", "minutesPlayed", "min_played"],
+async function games(sy){
+  if(!cache.games[sy])cache.games[sy]=await fetchNDJSON(`data/${sy}/games.ndjson`);
+  return cache.games[sy];
+}
+async function box(sy){
+  if(!cache.box[sy]){
+    status(`loading ${fmtSeason(sy)} box scores…`);
+    cache.box[sy]=await fetchNDJSON(`data/${sy}/boxscores.ndjson`);
+  }
+  return cache.box[sy];
+}
+async function playerIndex(){
+  if(!cache.idx){
+    status("loading player index…");
+    const r=await fetch("data/player_index.json",{cache:"no-cache"});
+    if(!r.ok)throw new Error("player_index.json missing — run scripts/build_player_index.py and push it");
+    cache.idx=await r.json();
+    cache.idxNames=Object.keys(cache.idx);
+    try{
+      const r2=await fetch("data/player_names.json",{cache:"no-cache"});
+      cache.pn=r2.ok?await r2.json():{};
+    }catch(e){cache.pn={}}
+  }
+  return cache.idx;
+}
+// stats name -> HoopsHype display name (identity fallback)
+function disp(n){return (cache.pn&&cache.pn[n])||n}
+async function teamCodes(){
+  if(cache.tc===undefined){
+    try{
+      const r=await fetch("data/team_codes.json",{cache:"no-cache"});
+      cache.tc=r.ok?(await r.json()).rules:null;
+    }catch(e){cache.tc=null}
+  }
+  return cache.tc;
+}
+// stats tricode + season -> HoopsHype {code, name}; identity fallback.
+function hh(tri,sy){
+  if(!tri)return {code:tri,name:tri};
+  if(cache.tc){
+    for(const r of cache.tc){
+      if(r.nba===tri&&(r.minSy==null||sy>=r.minSy)&&(r.maxSy==null||sy<=r.maxSy))
+        return {code:r.hh,name:r.name};
+    }
+  }
+  return {code:tri,name:tri};
+}
+// ---------- franchise continuity ----------
+// Any historical tricode or full name resolves to the CURRENT franchise, so relocated /
+// renamed teams count as one (e.g. Rochester/Cincinnati Royals -> Kansas City -> Sacramento
+// Kings). Runs on top of hh(); edit this table to adjust groupings.
+const FRANCHISE_DEFS=[
+  // current 30 franchises (with relocation / rename history)
+  ["ATL","Atlanta Hawks",["TRI","TCB","MLH","MIH","STL","ATL"],["Tri-Cities Blackhawks","Milwaukee Hawks","St. Louis Hawks"]],
+  ["BOS","Boston Celtics",["BOS"],[]],
+  ["BKN","Brooklyn Nets",["NJA","NYN","NJN","BRK","BKN"],["New Jersey Americans","New York Nets","New Jersey Nets"]],
+  ["CHA","Charlotte Hornets",["CHH","CHA","CHO"],["Charlotte Bobcats"]],
+  ["CHI","Chicago Bulls",["CHI"],[]],
+  ["CLE","Cleveland Cavaliers",["CLE"],[]],
+  ["DAL","Dallas Mavericks",["DAL"],[]],
+  ["DEN","Denver Nuggets",["DEN","DNR"],["Denver Rockets"]],
+  ["DET","Detroit Pistons",["FTW","DET"],["Fort Wayne Pistons"]],
+  ["GSW","Golden State Warriors",["PHW","SFW","SFO","GOS","GSW"],["Philadelphia Warriors","San Francisco Warriors"]],
+  ["HOU","Houston Rockets",["SDR","HOU"],["San Diego Rockets"]],
+  ["IND","Indiana Pacers",["IND"],[]],
+  ["LAC","LA Clippers",["BUF","SDC","LAC"],["Buffalo Braves","San Diego Clippers","Los Angeles Clippers"]],
+  ["LAL","Los Angeles Lakers",["MNL","LAL"],["Minneapolis Lakers"]],
+  ["MEM","Memphis Grizzlies",["VAN","MEM"],["Vancouver Grizzlies"]],
+  ["MIA","Miami Heat",["MIA"],[]],
+  ["MIL","Milwaukee Bucks",["MIL"],[]],
+  ["MIN","Minnesota Timberwolves",["MIN"],[]],
+  ["NOP","New Orleans Pelicans",["NOH","NOK","NOP"],["New Orleans Hornets","New Orleans/Oklahoma City Hornets"]],
+  ["NYK","New York Knicks",["NYK"],[]],
+  ["OKC","Oklahoma City Thunder",["SEA","OKC"],["Seattle SuperSonics"]],
+  ["ORL","Orlando Magic",["ORL"],[]],
+  ["PHI","Philadelphia 76ers",["SYR","PHI","PHL"],["Syracuse Nationals"]],
+  ["PHX","Phoenix Suns",["PHX","PHO"],[]],
+  ["POR","Portland Trail Blazers",["POR"],[]],
+  ["SAC","Sacramento Kings",["ROC","CIN","KCO","KCK","SAC"],["Rochester Royals","Cincinnati Royals","Kansas City-Omaha Kings","Kansas City Kings"]],
+  ["SAS","San Antonio Spurs",["SAS","SAN","SAA"],["Dallas Chaparrals","Texas Chaparrals"]],
+  ["TOR","Toronto Raptors",["TOR"],[]],
+  ["UTA","Utah Jazz",["NOJ","UTA","UTH"],["New Orleans Jazz"]],
+  ["WAS","Washington Wizards",["CHP","CHZ","BAL","CAP","WSB","WAS"],["Chicago Packers","Chicago Zephyrs","Capital Bullets","Washington Bullets"]],
+  // defunct early franchises (1946-1950s), kept distinct
+  ["AND","Anderson Packers",["AND"],[]],
+  ["BLB","Baltimore Bullets (1947-54)",["BLT","BLB"],[]],
+  ["BOM","St. Louis Bombers",["BOM"],[]],
+  ["CHS","Chicago Stags",["CHS"],[]],
+  ["CLR","Cleveland Rebels",["CLR"],[]],
+  ["DTF","Detroit Falcons",["DTF","DEF"],[]],
+  ["DNN","Denver Nuggets (1949-50)",["DN","DNN"],[]],
+  ["HUS","Toronto Huskies",["HUS"],[]],
+  ["INJ","Indianapolis Jets",["JET","INJ"],[]],
+  ["INO","Indianapolis Olympians",["INO"],[]],
+  ["PIT","Pittsburgh Ironmen",["PIT"],[]],
+  ["PRO","Providence Steamrollers",["PRO"],[]],
+  ["SHE","Sheboygan Red Skins",["SHE"],[]],
+  ["WAT","Waterloo Hawks",["WAT"],[]],
+  ["WSC","Washington Capitols",["WSC","CAP49"],[]],
+];
+const FRANCHISE={};
+for(const [code,name,tris,names] of FRANCHISE_DEFS){ const v={code,name};
+  for(const t of tris) FRANCHISE["T:"+t.toUpperCase()]=v;
+  for(const nm of (names||[])) FRANCHISE["N:"+nm.toUpperCase()]=v;
+  FRANCHISE["N:"+name.toUpperCase()]=v;
+}
+function franchise(tri,sy){
+  const m=hh(tri,sy);
+  return FRANCHISE["T:"+(tri||"").toUpperCase()]
+      || FRANCHISE["N:"+((m&&m.name)||"").toUpperCase()]
+      || FRANCHISE["T:"+((m&&m.code)||"").toUpperCase()]
+      || m;
 }
 
+// game type is encoded in the gameId's 3rd character
+function gameType(gid){
+  const c=String(gid||"")[2];
+  return c==="2"?{s:"RS",l:"Regular Season",col:"var(--dim)"}
+       : c==="4"?{s:"PO",l:"Playoffs",col:"var(--gold)"}
+       : c==="5"?{s:"PI",l:"Play-In",col:"var(--green)"}
+       : c==="1"?{s:"PRE",l:"Preseason",col:"var(--dim)"}
+       : c==="3"?{s:"AS",l:"All-Star",col:"var(--dim)"}
+       : {s:"",l:"",col:"var(--dim)"};
+}
+function typeBadge(gid){
+  const t=gameType(gid);
+  return t.s?`<span style="border:1px solid ${t.col};color:${t.col};border-radius:5px;padding:1px 6px;font-size:10px;letter-spacing:1px">${t.l.toUpperCase()}</span>`:"";
+}
 
-def detect(rows, need=("pid", "team", "gid")):
-    """-> {logical: actual}. Loud about anything it could not find."""
-    keys = set()
-    for r in rows[:200]:
-        keys |= set(r.keys())
-    got = {}
-    for logical, opts in CANDIDATES.items():
-        for o in opts:
-            if o in keys:
-                got[logical] = o
-                break
-    missing = [n for n in need if n not in got]
-    if missing:
-        print(f"  !! could not find field(s) for: {', '.join(missing)}")
-        print(f"     the rows carry: {', '.join(sorted(keys))}")
-        print(f"     add the name to CANDIDATES in {os.path.basename(__file__)}")
-        sys.exit(2)
-    return got
+// ---------- utils ----------
+function fmtSeason(sy){return (sy-1)+"-"+String(sy).slice(-2).padStart(2,"0")}
+function status(s){$("status").textContent=s||""}
+function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}
+function v(x){return x==null?"—":x}
+function seasonCandidates(dateStr){
+  const [y,m]=dateStr.split("-").map(Number);
+  // Sep–Dec → season ends next year. Jan–Jun → ends this year.
+  // Jul/Aug ambiguous (2020 bubble): try same-year end first, then next.
+  if(m>=9)return [y+1];
+  if(m<=6)return [y];
+  return [y,y+1];
+}
 
+// ---------- rendering ----------
+function gameCards(list,title){
+  let h=title?`<div class="teamhd">${title}</div>`:"";
+  h+='<div class="glist">';
+  for(const g of list){
+    const A=hh(g.away,g.sy),H=hh(g.home,g.sy);
+    h+=`<div class="gcard" onclick="openGame(${g.sy},'${esc(g.gameId)}')">
+      <span class="sc" title="${esc(A.code)} at ${esc(H.code)}">${esc(A.name)} <b>${v(g.awayScore)}</b> @ ${esc(H.name)} <b>${v(g.homeScore)}</b></span>
+      <small>${typeBadge(g.gameId)} ${esc(g.date)} · ${fmtSeason(g.sy)}</small></div>`;
+  }
+  return h+"</div>";
+}
+const COLS=[["min","MIN"],["pts","PTS"],["fgm","FGM"],["fga","FGA"],["tpm","3PM"],["tpa","3PA"],["ftm","FTM"],["fta","FTA"],["oreb","ORB"],["dreb","DRB"],["reb","REB"],["ast","AST"],["stl","STL"],["blk","BLK"],["tov","TOV"],["pf","PF"],["pm","+/-"]];
+function teamTable(name,rows){
+  rows=rows.slice().sort((a,b)=>(b.min||0)-(a.min||0)||(b.pts||0)-(a.pts||0));
+  let h=`<div class="teamhd"><b>${esc(name)}</b></div><table><tr><th>Player</th>`;
+  for(const[,lab]of COLS)h+=`<th>${lab}</th>`;
+  h+="</tr>";
+  const tot={};
+  for(const r of rows){
+    h+=`<tr><td>${playerLink(r.name)}${r.starter?" *":""}</td>`;
+    for(const[k]of COLS){h+=`<td>${v(r[k])}</td>`;if(typeof r[k]==="number")tot[k]=(tot[k]||0)+r[k]}
+    h+="</tr>";
+  }
+  h+='<tr class="tot"><td>Totals</td>';
+  for(const[k]of COLS)h+=`<td>${k==="min"?(tot[k]?Math.round(tot[k]):"—"):(k in tot?tot[k]:"—")}</td>`;
+  return h+"</tr></table>";
+}
+function playerLink(n){return `<a href="#" style="color:inherit" onclick="event.preventDefault();gotoPlayer('${esc(n).replace(/'/g,"\\'")}')">${esc(disp(n))}</a>`}
 
-def read_ndjson(path):
-    out = []
-    with open(path, encoding="utf-8") as f:
-        for n, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                out.append(json.loads(line))
-            except json.JSONDecodeError as e:
-                print(f"  !! {os.path.basename(path)} line {n}: {e}")
-    return out
+// ---------- actions ----------
+async function showDate(){
+  const d=$("dateInput").value;
+  if(!d)return status("pick a date");
+  status("loading…");$("out").innerHTML="";
+  try{
+    await teamCodes();
+    let found=[];
+    for(const sy of seasonCandidates(d)){
+      try{found=(await games(sy)).filter(g=>g.date===d).map(g=>({...g,sy}))}catch(e){}
+      if(found.length)break;
+    }
+    status(found.length?`${found.length} game(s) on ${d}`:`no games on ${d}`);
+    $("out").innerHTML=gameCards(found);
+  }catch(e){status("error: "+e.message)}
+}
+window.openGame=async function(sy,gid){
+  status("loading box score…");
+  try{
+    await teamCodes();
+    const rows=(await box(sy)).filter(r=>r.gameId===gid);
+    const g=(await games(sy)).find(x=>x.gameId===gid)||{};
+    const home=rows.filter(r=>r.homeGame===1),away=rows.filter(r=>r.homeGame!==1);
+    const A=hh(g.away,sy),H=hh(g.home,sy);
+    const hd=`<span class="bk" onclick="history.back()">&larr; back</span>
+      <div class="teamhd">${esc(A.name)} <b>${v(g.awayScore)}</b> @ ${esc(H.name)} <b>${v(g.homeScore)}</b>
+      &nbsp;${typeBadge(gid)}&nbsp;<small style="color:var(--dim)">${esc(g.date)} · ${fmtSeason(sy)}</small></div>`;
+    $("out").innerHTML=hd+teamTable(A.name+" ("+A.code+", away)",away)+teamTable(H.name+" ("+H.code+", home)",home);
+    status(rows.length?"":"no player rows found for this game");
+    window.scrollTo({top:0,behavior:"smooth"});
+  }catch(e){status("error: "+e.message)}
+}
+async function fillTeams(){
+  const sy=+$("teamSeason").value;
+  try{
+    await teamCodes();
+    const gs=await games(sy),set=new Set();
+    gs.forEach(g=>{if(g.home)set.add(g.home);if(g.away)set.add(g.away)});
+    const opts=[...set].map(t=>{const m=hh(t,sy);return {t,lab:m.code+" — "+m.name}})
+      .sort((a,b)=>a.lab<b.lab?-1:1);
+    $("teamSel").innerHTML=opts.map(o=>`<option value="${esc(o.t)}">${esc(o.lab)}</option>`).join("");
+    status(`${set.size} teams in ${fmtSeason(sy)}`);
+  }catch(e){status("error: "+e.message)}
+}
+async function showTeam(){
+  const sy=+$("teamSeason").value,t=$("teamSel").value;
+  status("loading…");
+  try{
+    const m=hh(t,sy);
+    const list=(await games(sy)).filter(g=>g.home===t||g.away===t).map(g=>({...g,sy}));
+    status(`${list.length} games — ${m.name} (${m.code}), ${fmtSeason(sy)}`);
+    $("out").innerHTML=gameCards(list);
+  }catch(e){status("error: "+e.message)}
+}
+window.gotoPlayer=async function(name){
+  setTab("Player");$("playerInput").value=name;
+  await pickPlayer(name);
+}
+async function pickPlayer(name){
+  $("sugbox").style.display="none";
+  try{
+    const idx=await playerIndex();
+    const seasons=idx[name];
+    if(!seasons){status("not in index: "+name);return}
+    status(`${disp(name)}: ${seasons.length} season(s)`);
+    $("playerSeasons").innerHTML=seasons.map(sy=>`<span class="pill" onclick="playerSeason('${esc(name).replace(/'/g,"\\'")}',${sy})">${fmtSeason(sy)}</span>`).join("");
+    $("out").innerHTML="";
+  }catch(e){status("error: "+e.message)}
+}
+window.playerSeason=async function(name,sy){
+  status("loading game log…");
+  try{
+    await teamCodes();
+    const rows=(await box(sy)).filter(r=>r.name===name).sort((a,b)=>a.date<b.date?-1:1);
+    let h=`<div class="teamhd"><b>${esc(disp(name))}</b> — ${fmtSeason(sy)} game log (${rows.length} games)</div><table><tr><th>Date</th><th>Type</th><th>Tm</th><th>Opp</th>`;
+    for(const[,lab]of COLS)h+=`<th>${lab}</th>`;h+="</tr>";
+    const tot={};let n=0;
+    for(const r of rows){
+      const t=gameType(r.gameId);
+      h+=`<tr><td><a href="#" style="color:inherit" onclick="event.preventDefault();openGame(${sy},'${esc(r.gameId)}')">${esc(r.date)}</a></td><td style="color:${t.col}">${t.s}</td><td title="${esc(hh(r.team,sy).code)}">${esc(hh(r.team,sy).name)}</td><td>${r.homeGame?"vs":"@"} ${esc(hh(r.opp,sy).name)}</td>`;
+      for(const[k]of COLS){h+=`<td>${v(r[k])}</td>`;if(typeof r[k]==="number")tot[k]=(tot[k]||0)+r[k]}
+      h+="</tr>";n++;
+    }
+    h+='<tr class="tot"><td colspan="4">Per game</td>';
+    for(const[k]of COLS)h+=`<td>${k in tot&&n?(tot[k]/n).toFixed(1):"—"}</td>`;
+    $("out").innerHTML=h+"</tr></table>";
+    status("");
+  }catch(e){status("error: "+e.message)}
+}
 
+// ---------- player autocomplete ----------
+let sugTimer=null;
+$("playerInput").addEventListener("input",async()=>{
+  clearTimeout(sugTimer);
+  sugTimer=setTimeout(async()=>{
+    const q=$("playerInput").value.trim().toLowerCase();
+    if(q.length<2){$("sugbox").style.display="none";return}
+    await playerIndex();status("");
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)||disp(n).toLowerCase().includes(q)).slice(0,30);
+    $("sugbox").innerHTML=hits.map(n=>{const d=disp(n);return `<div onclick="window.__pick('${esc(n).replace(/'/g,"\\'")}')">${esc(d)}${d!==n?` <small style=\"color:var(--dim)\">(${esc(n)})</small>`:""}</div>`}).join("");
+    $("sugbox").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__pick=n=>{$("playerInput").value=n;pickPlayer(n)};
 
-def game_type(gid):
-    """-> one of GAME_TYPE's values, or 'unknown'."""
-    g = str(gid or "")
-    if len(g) >= 3 and g[:3] in GAME_TYPE:
-        return GAME_TYPE[g[:3]]
-    return "unknown"
+// HoopsHype disambiguation for players who share a source name. The name-based
+// player_names.json can't split same-named players, so we resolve by personId.
+let PERSON_ALIAS = {
+  "77144": "Fast Eddie Johnson",      // ATL guard (vs the scorer "Eddie Johnson")
+  "77148": "George Johnson (1956)",   // MIL guard (the NJN one keeps "George Johnson (1948)")
+};
+function pdisp(pid, name){ return PERSON_ALIAS[String(pid)] || disp(name); }
+let _aliasLoaded=false;
+async function ensureAliases(){ if(_aliasLoaded)return; _aliasLoaded=true; try{ const r=await fetch("data/person_alias.json",{cache:"no-cache"}); if(r.ok) Object.assign(PERSON_ALIAS, await r.json()); }catch(e){} }
+let wlLabel="", wlHashable=true;
 
+// ---------- player W / L ----------
+let wlName=null, wlAcc=null, wlSort={key:"tot_g",dir:-1}, wlSugTimer=null;
+const gcount=e=>e.rs.w+e.rs.l+e.po.w+e.po.l;
+function fmtPct(w,l){const g=w+l;return g?(w/g).toFixed(3).replace(/^0(?=\.)/,''):"\u2014";}
+function pnum(w,l){return (w+l)?w/(w+l):-1;}
 
-def minutes_of(v):
-    """
-    Minutes as a float, from any of the shapes these feeds use.
+async function buildPlayerWL(name){
+  const idx=await playerIndex(); const seasons=idx[name]; if(!seasons)return null;
+  await teamCodes(); await ensureAliases();
+  const perPid={};
+  const ent=(p,m)=>{if(!p.teams[m.code])p.teams[m.code]={code:m.code,name:m.name,rs:{w:0,l:0},po:{w:0,l:0}};p.teams[m.code].name=m.name;return p.teams[m.code];};
+  for(const sy of seasons){
+    status(`W/L: ${disp(name)} \u2014 ${fmtSeason(sy)}\u2026`);
+    let bx,gs; try{ bx=await box(sy); gs=await games(sy); }catch(e){ continue; }
+    const gid={}; for(const g of gs) gid[g.gameId]=g;
+    for(const r of bx){
+      if(r.name!==name) continue;
+      const g=gid[r.gameId]; if(!g||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore) continue;
+      const c=gameType(r.gameId).s, cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat) continue;
+      const won = r.homeGame ? (g.homeScore>g.awayScore) : (g.awayScore>g.homeScore);
+      const pid=String(r.personId);
+      const p=perPid[pid]||(perPid[pid]={pid, dn:pdisp(pid,name), teams:{}});
+      const e=ent(p, franchise(r.team,sy)); if(won)e[cat].w++; else e[cat].l++;
+    }
+  }
+  return perPid;
+}
 
-    liveData sends ISO durations ('PT34M12.00S'), the archive may hold 'MM:SS'
-    or a plain number, and an inactive player may hold '' or None. A DNP has to
-    be distinguishable from a real appearance or every inactive player on the
-    bench becomes a debut.
-    """
-    if v is None or v == "":
-        return 0.0
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip()
-    m = re.match(r"^PT(?:(\d+)M)?(?:([\d.]+)S)?$", s)
-    if m:
-        return int(m.group(1) or 0) + float(m.group(2) or 0) / 60.0
-    if ":" in s:
-        a, _, b = s.partition(":")
-        try:
-            return int(a or 0) + float(b or 0) / 60.0
-        except ValueError:
-            return 0.0
-    try:
-        return float(s)
-    except ValueError:
-        return 0.0
+let wlPerPid=null;
+async function loadPlayerWL(name, teamCode){
+  status("computing W/L\u2026");
+  try{ wlPerPid=await buildPlayerWL(name); }catch(e){ status("error: "+e.message); return; }
+  if(!wlPerPid){ status("not in index: "+esc(name)); $("out").innerHTML=""; return; }
+  const pids=Object.keys(wlPerPid); status("");
+  if(pids.length===0){ $("out").innerHTML=""; return; }
+  if(pids.length===1){ showPlayerPid(pids[0], name, teamCode, true); return; }
+  wlName=null; wlHashable=false; $("wlPlayer").value=disp(name);
+  const opts=pids.map(pid=>{const p=wlPerPid[pid];const g=Object.values(p.teams).reduce((z,t)=>z+t.rs.w+t.rs.l+t.po.w+t.po.l,0);return{pid,dn:p.dn,g};}).sort((a,b)=>b.g-a.g);
+  $("out").innerHTML=`<div class="teamhd">More than one player has appeared as "${esc(disp(name))}" \u2014 pick one:</div><div class="wlcards">`+opts.map(o=>`<div class="wlcard" style="cursor:pointer" onclick="wlPickPid('${esc(o.pid)}')"><div class="lab">${o.g} games</div><div class="big" style="font-size:17px">${esc(o.dn)}</div><div class="pct">id ${esc(o.pid)}</div></div>`).join("")+`</div>`;
+}
+function showPlayerPid(pid, indexName, teamCode, hashable){
+  const p=wlPerPid&&wlPerPid[pid]; if(!p)return;
+  wlAcc={}; for(const code in p.teams) wlAcc[code]=p.teams[code];
+  wlName=indexName; wlLabel=p.dn; wlHashable=!!hashable;
+  const teams=Object.values(wlAcc).sort((a,b)=>gcount(b)-gcount(a));
+  $("wlTeam").innerHTML='<option value="">All teams</option>'+teams.map(t=>`<option value="${esc(t.code)}">${esc(t.name)}</option>`).join("");
+  $("wlTeam").value=(teamCode && teams.some(t=>t.code===teamCode))?teamCode:"";
+  $("wlPlayer").value=p.dn;
+  if(hashable) syncWlHash();
+  renderPlayerWL();
+}
+window.wlPickPid=pid=>showPlayerPid(pid, null, "", false);
 
+function syncWlHash(){ if(!wlName||!wlHashable)return; const t=$("wlTeam").value; const nh="wl="+encodeURIComponent(wlName)+(t?"&team="+encodeURIComponent(t):""); if(location.hash.replace(/^#/,"")!==nh) location.hash=nh; }
+function renderPlayerWL(){
+  if(!wlAcc){$("out").innerHTML="";return;}
+  const filt=$("wlTeam").value, all=Object.values(wlAcc);
+  const shown=filt?all.filter(t=>t.code===filt):all;
+  let rw=0,rl=0,pw=0,pl=0; for(const t of shown){rw+=t.rs.w;rl+=t.rs.l;pw+=t.po.w;pl+=t.po.l;}
+  const tw=rw+pw, tl=rl+pl, who=filt?(wlAcc[filt]?wlAcc[filt].name:filt):"All teams";
+  const card=(lab,w,l)=>`<div class="wlcard"><div class="lab">${lab}</div><div class="big">${w}\u2013${l}</div><div class="pct">${fmtPct(w,l)}</div></div>`;
+  const head=`<div class="teamhd"><b>${esc(wlLabel||disp(wlName))}</b> \u2014 W/L (${esc(who)})</div>`;
+  const cards=`<div class="wlcards">${card("Regular Season",rw,rl)}${card("Playoffs",pw,pl)}${card("Combined",tw,tl)}</div>`;
+  const rows=all.map(t=>({name:t.name,code:t.code,rs_w:t.rs.w,rs_l:t.rs.l,rs_pct:pnum(t.rs.w,t.rs.l),po_w:t.po.w,po_l:t.po.l,po_pct:pnum(t.po.w,t.po.l),tot_w:t.rs.w+t.po.w,tot_l:t.rs.l+t.po.l,tot_pct:pnum(t.rs.w+t.po.w,t.rs.l+t.po.l),tot_g:gcount(t)}));
+  const {key,dir}=wlSort;
+  rows.sort((x,y)=>{const av=x[key],bv=y[key];if(typeof av==="string")return dir*av.localeCompare(bv);return dir*(av-bv)||x.name.localeCompare(y.name);});
+  const COLS=[["name","Team","left"],["rs_w","RS W","right"],["rs_l","RS L","right"],["rs_pct","RS %","right"],["po_w","PO W","right"],["po_l","PO L","right"],["po_pct","PO %","right"],["tot_w","W","right"],["tot_l","L","right"],["tot_pct","Win %","right"]];
+  const th=COLS.map(c=>`<th style="text-align:${c[2]}" onclick="wlSortBy('${c[0]}')">${c[1]}${key===c[0]?(dir<0?" \u25be":" \u25b4"):""}</th>`).join("");
+  const cell=(r,k)=>{ if(k==="name")return esc(r.name); if(k.endsWith("_pct")){const p=k.replace("_pct","");return fmtPct(r[p+"_w"],r[p+"_l"]);} return r[k]; };
+  const tb=rows.map(r=>`<tr onclick="wlSetTeam('${esc(r.code)}')" class="${r.code===filt?'sel':''}">`+COLS.map(c=>`<td class="${c[0]==='name'?'n':''}" style="text-align:${c[2]}">${cell(r,c[0])}</td>`).join("")+"</tr>").join("");
+  $("out").innerHTML=head+cards+`<div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${th}</tr></thead><tbody>${tb}</tbody></table></div>`;
+}
+function wlSortBy(k){ if(wlSort.key===k)wlSort.dir*=-1; else wlSort={key:k,dir:k==="name"?1:-1}; renderPlayerWL(); }
+window.wlSetTeam=code=>{ $("wlTeam").value=($("wlTeam").value===code?"":code); syncWlHash(); renderPlayerWL(); };
+$("wlPlayer").addEventListener("input",()=>{
+  clearTimeout(wlSugTimer);
+  wlSugTimer=setTimeout(async()=>{
+    const q=$("wlPlayer").value.trim().toLowerCase();
+    if(q.length<2){$("wlSug").style.display="none";return;}
+    await playerIndex();
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)||disp(n).toLowerCase().includes(q)).slice(0,30);
+    $("wlSug").innerHTML=hits.map(n=>{const d=disp(n);return `<div onclick="window.__wlpick('${esc(n).replace(/'/g,"\\'")}')">${esc(d)}${d!==n?` <small style="color:var(--dim)">(${esc(n)})</small>`:""}</div>`;}).join("");
+    $("wlSug").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__wlpick=n=>{ $("wlSug").style.display="none"; loadPlayerWL(n,""); };
+function parseWlHash(){ const p=new URLSearchParams(location.hash.replace(/^#/,"")); return p.has("wl")?{name:p.get("wl"),team:p.get("team")||""}:null; }
+async function onWlHash(){
+  const q=parseWlHash(); if(!q)return;
+  setTab("WL");
+  if(q.name===wlName){ if(q.team!==$("wlTeam").value){ $("wlTeam").value=q.team; renderPlayerWL(); } return; }
+  await loadPlayerWL(q.name,q.team);
+}
+window.addEventListener("hashchange",onWlHash);
 
-def days_between(a, b):
-    """Whole days between two YYYY-MM-DD strings, without importing a calendar."""
-    import datetime
-    try:
-        da = datetime.date(*(int(x) for x in a[:10].split("-")))
-        db = datetime.date(*(int(x) for x in b[:10].split("-")))
-        return (db - da).days
-    except Exception:
-        return 0
+// ---------- W/L leaderboard ----------
+let lbAcc=null, lbCodeName={}, lbSort={key:"tot_pct",dir:-1}, lbBuilding=false, lbSeasonWins={}, lbSeasonList=null, lbSeasons=null;
+async function buildLB(){
+  const a=+$("lbFrom").value,b=+$("lbTo").value,lo=Math.min(a,b),hi=Math.max(a,b);
+  const seasons=(lbSeasonList&&lbSeasonList.length)?lbSeasonList.slice():(function(){const _a=[];for(let y=lo;y<=hi;y++)_a.push(y);return _a;})();
+  await ensureAliases(); await playerIndex(); await teamCodes();
+  const acc={}; lbCodeName={}; lbSeasonWins={}; let loaded=0,skipped=0; lbBuilding=true; $("lbGo").disabled=true;
+  for(const sy of seasons){
+    status(`Leaderboard: ${fmtSeason(sy)}\u2026 (${loaded} seasons)`);
+    let bx,gs; try{bx=await box(sy);gs=await games(sy);}catch(e){skipped++;continue;}
+    loaded++;
+    const gid={};for(const g of gs)gid[g.gameId]=g;
+    for(const r of bx){
+      const g=gid[r.gameId]; if(!g||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore)continue;
+      const c=gameType(r.gameId).s,cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat)continue;
+      const won=r.homeGame?(g.homeScore>g.awayScore):(g.awayScore>g.homeScore);
+      const m=franchise(r.team,sy); lbCodeName[m.code]=m.name;
+      const pid=String(r.personId);
+      if(won){ const _sw=lbSeasonWins[pid]||(lbSeasonWins[pid]={}); const _e=_sw[sy]||(_sw[sy]={rs:0,po:0}); _e[cat]++; }
+      const p=acc[pid]||(acc[pid]={pid, dn:pdisp(pid,r.name), teams:{}});
+      const tt=p.teams[m.code]||(p.teams[m.code]={rs:{w:0,l:0},po:{w:0,l:0}});
+      tt[cat][won?"w":"l"]++;
+    }
+    for(const g of gs){
+      if(g.home==null||g.away==null||g.homeScore==null||g.awayScore==null||g.homeScore===g.awayScore)continue;
+      const c=gameType(g.gameId).s,cat=c==="RS"?"rs":c==="PO"?"po":null; if(!cat)continue;
+      const H=franchise(g.home,sy), A=franchise(g.away,sy);
+      lbCodeName[H.code]=H.name; lbCodeName[A.code]=A.name;
+      const hw=g.homeScore>g.awayScore;
+      const wc=hw?H.code:A.code, wn=hw?H.name:A.name, lc=hw?A.code:H.code, ln=hw?A.name:H.name;
+      const wk="T:"+wc, lk="T:"+lc;
+      const we=acc[wk]||(acc[wk]={pid:wk, dn:wn, isTeam:true, teams:{}});
+      const le=acc[lk]||(acc[lk]={pid:lk, dn:ln, isTeam:true, teams:{}});
+      (we.teams[wc]||(we.teams[wc]={rs:{w:0,l:0},po:{w:0,l:0}}))[cat].w++;
+      (le.teams[lc]||(le.teams[lc]={rs:{w:0,l:0},po:{w:0,l:0}}))[cat].l++;
+      const _ts=lbSeasonWins[wk]||(lbSeasonWins[wk]={}); const _te=_ts[sy]||(_ts[sy]={rs:0,po:0}); _te[cat]++;
+    }
+  }
+  $("lbGo").disabled=false; lbBuilding=false; lbAcc=acc; lbSeasons=seasons;
+  const unmapped=Object.keys(lbCodeName).filter(c=>lbCodeName[c]===c);
+  if(unmapped.length) console.warn("[franchise] unmapped team codes - tell Claude to add these:", unmapped.sort().join(", "));
+  const opts=Object.keys(lbCodeName).map(c=>({c,n:lbCodeName[c]})).sort((x,y)=>x.n.localeCompare(y.n));
+  const cur=$("lbTeam").value;
+  $("lbTeam").innerHTML='<option value="">All teams</option>'+opts.map(o=>`<option value="${esc(o.c)}">${esc(o.n)}</option>`).join("");
+  if(opts.some(o=>o.c===cur))$("lbTeam").value=cur;
+  status(`Leaderboard: ${Object.keys(acc).filter(k=>!k.startsWith("T:")).length} players \u00b7 ${loaded} season(s)${skipped?` \u00b7 ${skipped} no data`:""}`);
+  renderLB();
+}
+function _csvCell(v){ v=(v==null?"":String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+function downloadFile(name,text,mime){ const b=new Blob([text],{type:mime||"text/plain;charset=utf-8"}); const u=URL.createObjectURL(b); const a=document.createElement("a"); a.href=u; a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(u);},120); }
+function downloadBarRace(){
+  if(!lbAcc||!lbSeasons||!lbSeasons.length){ status("Build the leaderboard first, then download the bar race."); return; }
+  const type=($("lbRaceType")&&$("lbRaceType").value)||"tot";
+  const winsOf=function(e){ return !e?0:(type==="rs"?e.rs:type==="po"?e.po:(e.rs+e.po)); };
+  const label=type==="rs"?"Regular Season":type==="po"?"Playoffs":"RS+PO";
+  const years=lbSeasons.slice().sort((a,b)=>a-b);
+  const lines=[["Name",...years].map(_csvCell).join(",")];
+  const inclTeams=$("lbInclTeams")&&$("lbInclTeams").checked;
+  let n=0;
+  for(const pid in lbAcc){
+    if(lbAcc[pid].isTeam&&!inclTeams)continue;
+    const sw=lbSeasonWins[pid]||{}, name=lbAcc[pid].dn||pid; let cum=0; const row=[name];
+    for(const y of years){ cum+=winsOf(sw[y]); row.push(cum); }
+    lines.push(row.map(_csvCell).join(",")); n++;
+  }
+  downloadFile("wl-bar-race-"+type+"-"+years[0]+"-"+years[years.length-1]+".csv", lines.join("\n"), "text/csv;charset=utf-8");
+  status("Bar race CSV ("+label+"): "+n+" players \u00d7 "+years.length+" seasons (cumulative wins).");
+}
+function renderLB(){
+  if(!lbAcc){$("out").innerHTML="";return;}
+  const minG=+$("lbMin").value||0, minRS=+$("lbMinRS").value||0, minPO=+$("lbMinPO").value||0, filt=$("lbTeam").value, cap=Math.max(2,+$("lbCount").value||100);
+  const minLabel="min "+minG+" G"+(minRS?", "+minRS+" RS":"")+(minPO?", "+minPO+" PO":"");
+  const inclTeams=$("lbInclTeams")&&$("lbInclTeams").checked;
+  const rows=[];
+  for(const pid in lbAcc){
+    const p=lbAcc[pid]; if(p.isTeam&&!inclTeams)continue; let rw=0,rl=0,pw=0,pl=0;
+    if(filt){ const tt=p.teams[filt]; if(!tt)continue; rw=tt.rs.w;rl=tt.rs.l;pw=tt.po.w;pl=tt.po.l; }
+    else { for(const c in p.teams){const tt=p.teams[c];rw+=tt.rs.w;rl+=tt.rs.l;pw+=tt.po.w;pl+=tt.po.l;} }
+    const rsG=rw+rl, poG=pw+pl, g=rsG+poG; if(g<minG||rsG<minRS||poG<minPO)continue;
+    rows.push({pid:p.pid,dn:p.dn,isTeam:p.isTeam,rs_w:rw,rs_l:rl,rs_pct:pnum(rw,rl),po_w:pw,po_l:pl,po_pct:pnum(pw,pl),tot_w:rw+pw,tot_l:rl+pl,tot_pct:pnum(rw+pw,rl+pl),tot_g:g});
+  }
+  const {key,dir}=lbSort;
+  rows.sort((x,y)=>{const av=x[key],bv=y[key];if(key==="dn")return dir*av.localeCompare(bv);return dir*(av-bv)||x.dn.localeCompare(y.dn);});
+  rows.forEach((r,i)=>r.rank=i+1);
+  let show=rows, note=`${rows.length} players`;
+  if(rows.length>cap){ const half=Math.floor(cap/2); show=rows.slice(0,half).concat([{sep:rows.length-2*half}]).concat(rows.slice(rows.length-half)); note=`${rows.length} players \u00b7 top ${half} + bottom ${half}`; }
+  const COLS=[["rank","#","right",false],["dn","Player","left",true],["rs_w","RS W","right",true],["rs_l","RS L","right",true],["rs_pct","RS %","right",true],["po_w","PO W","right",true],["po_l","PO L","right",true],["po_pct","PO %","right",true],["tot_w","W","right",true],["tot_l","L","right",true],["tot_pct","Win %","right",true]];
+  const th=COLS.map(c=>`<th style="text-align:${c[2]}" ${c[3]?`onclick="lbSortBy('${c[0]}')"`:""}>${c[1]}${key===c[0]?(dir<0?" \u25be":" \u25b4"):""}</th>`).join("");
+  const cell=(r,k)=>{ if(k==="rank")return r.rank; if(k==="dn"){const _lnk=`<a href="#" style="color:inherit" onclick="event.preventDefault();lbGoto('${esc(r.pid)}')">${esc(r.dn)}</a>`;return r.isTeam?_lnk+' <span style="font-size:9px;letter-spacing:.5px;color:#e6b04a;border:1px solid #e6b04a55;border-radius:3px;padding:1px 4px;vertical-align:middle">TEAM</span>':_lnk;} if(k.endsWith("_pct")){const p=k.replace("_pct","");return fmtPct(r[p+"_w"],r[p+"_l"]);} return r[k]; };
+  const body=show.map(r=> r.sep!==undefined ? `<tr><td colspan="${COLS.length}" style="text-align:center;color:var(--dim)">\u2026 ${r.sep} more \u2026</td></tr>` : "<tr>"+COLS.map(c=>`<td class="${c[0]==='dn'?'n':''}" style="text-align:${c[2]}">${cell(r,c[0])}</td>`).join("")+"</tr>").join("");
+  const scope=filt?(lbCodeName[filt]||filt):"All teams";
+  $("out").innerHTML=`<div class="teamhd">W/L Leaderboard <span style="color:var(--dim);font-size:12px">(${esc(scope)}, ${minLabel}) \u00b7 ${note}</span></div><div class="panel" style="overflow:auto"><table class="wl"><thead><tr>${th}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+function lbSortBy(k){ if(lbSort.key===k)lbSort.dir*=-1; else lbSort={key:k,dir:k==="dn"?1:-1}; renderLB(); }
+window.lbGoto=pid=>{
+  const p=lbAcc&&lbAcc[pid]; if(!p)return;
+  setTab("WL"); wlName=p.dn; wlLabel=p.dn; wlHashable=false; wlAcc={};
+  for(const code in p.teams){ const t=p.teams[code]; wlAcc[code]={code,name:lbCodeName[code]||code,rs:{w:t.rs.w,l:t.rs.l},po:{w:t.po.w,l:t.po.l}}; }
+  const teams=Object.values(wlAcc).sort((a,b)=>(b.rs.w+b.rs.l+b.po.w+b.po.l)-(a.rs.w+a.rs.l+a.po.w+a.po.l));
+  $("wlTeam").innerHTML='<option value="">All teams</option>'+teams.map(t=>`<option value="${esc(t.code)}">${esc(t.name)}</option>`).join("");
+  $("wlTeam").value=""; $("wlPlayer").value=wlLabel; renderPlayerWL();
+};
 
+// ---------- tabs & init ----------
+function setTab(t){
+  activeTab=t;
+  for(const x of["Date","Team","Player","WL","LB","TL","TN"]){
+    $("tab"+x).classList.toggle("on",x===t);
+    $("pane"+x).style.display=x===t?"":"none";
+  }
+  if(t==="LB" && !lbAcc && !lbBuilding) buildLB();
+}
+$("tabDate").onclick=()=>setTab("Date");
+$("tabTeam").onclick=()=>setTab("Team");
+$("tabPlayer").onclick=()=>setTab("Player");
+$("tabWL").onclick=()=>setTab("WL");
+$("tabLB").onclick=()=>setTab("LB");
+$("lbGo").onclick=buildLB;
+$("lbBarRace").onclick=downloadBarRace;
+let lbCareerTimer=null;
+$("lbCareer").addEventListener("input",()=>{
+  clearTimeout(lbCareerTimer);
+  lbCareerTimer=setTimeout(async()=>{
+    const q=$("lbCareer").value.trim().toLowerCase();
+    if(q.length<2){$("lbCareerSug").style.display="none";return;}
+    await playerIndex();
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)||disp(n).toLowerCase().includes(q)).slice(0,30);
+    $("lbCareerSug").innerHTML=hits.map(n=>{const d=disp(n);return `<div onclick="window.__lbCareer('${esc(n).replace(/'/g,"\\'")}')">${esc(d)}${d!==n?` <small style="color:var(--dim)">(${esc(n)})</small>`:""}</div>`;}).join("");
+    $("lbCareerSug").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__lbCareer=async name=>{
+  $("lbCareerSug").style.display="none";
+  const idx=await playerIndex(); const seasons=idx[name];
+  if(!seasons||!seasons.length){ status("no seasons for "+esc(name)); return; }
+  const uniq=[...new Set(seasons)].sort((a,b)=>a-b);
+  lbSeasonList=uniq;
+  const lo=uniq[0], hi=uniq[uniq.length-1];
+  $("lbFrom").value=lo; $("lbTo").value=hi;
+  const gaps=(hi-lo+1)-uniq.length;
+  $("lbCareer").value=disp(name)+" ("+fmtSeason(lo)+" \u2013 "+fmtSeason(hi)+" \u00b7 "+uniq.length+" season"+(uniq.length!==1?"s":"")+(gaps>0?", "+gaps+" skipped":"")+")";
+  buildLB();
+};
+["lbMin","lbMinRS","lbMinPO","lbTeam","lbCount"].forEach(id=>$(id).addEventListener("change",()=>{if(lbAcc)renderLB();}));
+["lbFrom","lbTo"].forEach(id=>$(id).addEventListener("change",()=>{lbSeasonList=null;}));
+$("lbInclTeams").addEventListener("change",()=>{if(lbAcc)renderLB();});
+$("wlTeam").addEventListener("change",()=>{syncWlHash();renderPlayerWL();});
+$("wlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
+$("dateGo").onclick=showDate;
+$("teamGo").onclick=showTeam;
+$("teamSeason").addEventListener("change",fillTeams);
+/* ---------- timeline ----------
+   One row per STINT: a contiguous run of appearances for one franchise, from
+   data/timelines.ndjson, which scripts/build_timelines.py derives from the same
+   box scores this page reads. Grouped by run rather than by team, so LeBron is
+   four rows and three franchises.
 
-def season_of(date_str, gid=""):
-    """
-    Season end year. October onwards belongs to the following year, so the 2025-26
-    season is 2026 -- matching the directory names in data/.
-    """
-    try:
-        y, m = int(date_str[:4]), int(date_str[5:7])
-        return y + 1 if m >= 9 else y
-    except Exception:
-        g = str(gid)
-        if len(g) >= 5 and g[3:5].isdigit():
-            yy = int(g[3:5])
-            return 2000 + yy + 1 if yy < 90 else 1900 + yy + 1
-        return 0
+   The file is ~5MB and fetched once per session, on first use of this tab rather
+   than at page load -- nobody who came to look up a date should pay for it. */
+let tlName="", tlRows=null;
+async function timelines(){
+  if(!tlRows){
+    status("loading timelines\u2026");
+    const all=await fetchNDJSON("data/timelines.ndjson");
+    tlRows={byName:{},byPid:{},byFr:{},frName:{},maxSy:0};
+    for(const r of all){
+      (tlRows.byName[r.name]=tlRows.byName[r.name]||[]).push(r);
+      (tlRows.byPid[r.personId]=tlRows.byPid[r.personId]||[]).push(r);
+      (tlRows.byFr[r.franchise]=tlRows.byFr[r.franchise]||[]).push(r);
+      tlRows.frName[r.franchise]=r.franchise_name;
+      const ls=(r.seasons||[]).slice(-1)[0]||0;
+      if(ls>tlRows.maxSy)tlRows.maxSy=ls;
+    }
+    status("");
+  }
+  return tlRows;
+}
+function tlSeasonOf(r,which){
+  const ss=r.seasons||[];
+  return which==="first"?(ss[0]||LAST_SY):(ss[ss.length-1]||LAST_SY);
+}
+async function showTimeline(name){
+  setTab("TL");
+  tlName=name;
+  $("tlPlayer").value=disp(name);
+  const t=await timelines();
+  const rows=t.byName[name]||[];
+  if(!rows.length){
+    $("out").innerHTML=`<div class="teamhd">No timeline for ${esc(disp(name))}</div>`
+      + `<div class="sub" style="margin:8px 2px">Either the name differs in data/timelines.ndjson, or that file predates this player. It is rebuilt by the daily workflow.</div>`;
+    return;
+  }
+  // One block per personId: two players can share a name, and merging them would
+  // invent a career that nobody had.
+  const byPid={};
+  for(const r of rows)(byPid[r.personId]=byPid[r.personId]||[]).push(r);
+  const pids=Object.keys(byPid).sort((x,y)=>
+    (byPid[x][0].first_game<byPid[y][0].first_game?-1:1));
+  let h="";
+  if(pids.length>1)
+    h+=`<div class="sub" style="margin:0 2px 10px">${pids.length} different players have appeared under this name \u2014 one table each.</div>`;
+  for(const pid of pids){
+    const list=byPid[pid].slice().sort((x,y)=>x.first_game<y.first_game?-1:1);
+    const dn=pdisp(pid,list[0].name);
+    const tot=list.reduce((n,r)=>n+(r.gp_regular||0),0);
+    const tpo=list.reduce((n,r)=>n+(r.gp_playoff||0),0);
+    const fr=new Set(list.map(r=>r.franchise)).size;
+    h+=`<div class="teamhd">${esc(dn)}`
+      + `<small style="color:var(--dim);font-weight:400"> \u00b7 id ${esc(pid)}`
+      + ` \u00b7 ${list.length} stint${list.length!==1?"s":""} at ${fr} franchise${fr!==1?"s":""}`
+      + ` \u00b7 ${tot} regular, ${tpo} playoff</small></div>`;
+    h+=`<table><thead><tr><th>#</th><th>Franchise</th><th>First game</th>`
+      + `<th>Last game</th><th>Seasons</th><th style="text-align:right">Reg</th>`
+      + `<th style="text-align:right">PO</th><th>Notes</th></tr></thead><tbody>`;
+    for(const r of list){
+      const sf=tlSeasonOf(r,"first"), sl=tlSeasonOf(r,"last");
+      const link=(d,sy,gid)=>gid
+        ? `<a href="#" style="color:inherit" onclick="event.preventDefault();openGame(${sy},'${esc(gid)}')">${esc(d)}</a>`
+        : esc(d);
+      const ss=r.seasons||[];
+      const seas=ss.length>1?`${fmtSeason(ss[0])} \u2013 ${fmtSeason(ss[ss.length-1])}`
+                : ss.length?fmtSeason(ss[0]):"\u2014";
+      // Tricodes only when they differ from the franchise, so a relocation is
+      // visible without adding noise to the twenty-eight rows that never moved.
+      const tri=(r.tricodes||[]).filter(x=>x!==r.franchise);
+      const notes=[];
+      if(tri.length)notes.push(`<span title="tricode in the box scores">${esc((r.tricodes||[]).join(" \u2192 "))}</span>`);
+      if(tnLive(r))notes.push(`<span style="color:var(--gold)">current</span>`);
+      if(r.longest_gap_days>=21)
+        notes.push(`<span style="color:var(--dim)" title="longest gap between appearances inside one season, from ${esc(r.longest_gap_from)} \u2014 an injury, a waiver, a late debut \u2014 or a league-wide stoppage, which is what the 142-day gaps in 2019-20 are">${r.longest_gap_days}d gap</span>`);
+      h+=`<tr><td>${r.stint}</td><td>${esc(r.franchise_name)}</td>`
+        + `<td>${link(r.first_game,sf,r.first_game_id)}</td>`
+        + `<td>${link(r.last_game,sl,r.last_game_id)}</td>`
+        + `<td>${seas}</td><td style="text-align:right">${r.gp_regular??"\u2014"}</td>`
+        + `<td style="text-align:right">${r.gp_playoff??"\u2014"}</td>`
+        + `<td>${notes.join(" \u00b7 ")}</td></tr>`;
+    }
+    h+=`</tbody></table>`;
+  }
+  $("out").innerHTML=h;
+  const nh="tl="+encodeURIComponent(name);
+  if(location.hash.replace(/^#/,"")!==nh)location.hash=nh;
+}
+function tlDownload(){
+  if(!tlName||!tlRows)return;
+  const rows=(tlRows.byName[tlName]||[]).slice()
+    .sort((x,y)=>x.first_game<y.first_game?-1:1);
+  const cols=["personId","name","franchise","franchise_name","stint","tricodes",
+              "first_game","last_game","seasons","gp_regular","gp_playoff",
+              "longest_gap_days","ongoing"];
+  const lines=[cols.join(",")];
+  for(const r of rows)
+    lines.push(cols.map(c=>_csvCell(Array.isArray(r[c])?r[c].join(" "):r[c])).join(","));
+  downloadFile(`timeline_${tlName.replace(/[^A-Za-z0-9]+/g,"_")}.csv`,
+               lines.join("\n"),"text/csv;charset=utf-8");
+}
+/* ---------- longest tenured ----------
+   The succession of "who has been here longest" at one franchise.
 
+   The only event that can change it is the HOLDER LEAVING. Anybody who arrives
+   later starts behind him by definition, so no arrival can ever overtake him --
+   which makes this a walk rather than a day-by-day sweep: take the holder, jump
+   to the day he plays his last game, ask who among the players still there
+   arrived earliest, and repeat.
 
-def load_rows(verbose=False):
-    """Every counted player-game appearance, as flat tuples."""
-    files = sorted(glob.glob(os.path.join(DATA, "*", "boxscores.ndjson")))
-    if not files:
-        print(f"  !! no data/*/boxscores.ndjson under {DATA}")
-        sys.exit(2)
-    print(f"rgm build_timelines {VERSION}\n\n  {len(files)} season file(s)")
+   Tenure runs from the start of the CURRENT stint. A player who left and came
+   back is a separate stint in the file, so the clock restarts at the return
+   without needing a special case here.
 
-    sample = read_ndjson(files[0])[:200]
-    F = detect(sample)
-    print("  fields: " + ", ".join(f"{k}={v}" for k, v in sorted(F.items())))
-    has_date = "date" in F
-    has_min = "min" in F
-    if not has_date:
-        print("  box score rows carry no date -- joining from games.ndjson")
-    if not has_min:
-        print("  box score rows carry no minutes -- every row counts as an"
-              " appearance, so an inactive player may read as a debut")
+   Ties on the arrival date -- common in a franchise's first game, when the whole
+   roster debuts together -- go to whoever ends up staying longer. Picking
+   arbitrarily would hand the title over on day one and read as a bug. */
+function tenureChain(fr){
+  const st=(tlRows.byFr[fr]||[]).slice().sort((a,b)=>
+    a.first_game<b.first_game?-1:a.first_game>b.first_game?1:
+    (a.last_game>b.last_game?-1:a.last_game<b.last_game?1:0));
+  const used=new Set(), chain=[];
+  let t=null;
+  while(true){
+    // Still with the franchise after t, and not already counted.
+    const cand=st.filter(x=>!used.has(x)&&(t===null||x.last_game>t));
+    if(!cand.length)break;
+    // Already arrived by t. If nobody has, the franchise had a gap here, so jump
+    // forward to the next arrival rather than inventing a holder.
+    const here=t===null?cand:cand.filter(x=>x.first_game<=t);
+    const pick=(here.length?here:cand)[0];
+    chain.push({r:pick, from:(t===null||pick.first_game>t)?pick.first_game:t, to:pick.last_game});
+    used.add(pick); t=pick.last_game;
+  }
+  return chain;
+}
+/* Still with the franchise at the end of the archive, judged by SEASON.
+   The file's own ongoing flag asks whether the last game was within ten days of
+   the newest game anywhere -- so on an archive that ends at the Finals, only the
+   two finalists qualified and the other twenty-eight franchises vanished from
+   this table. Reaching the latest season is the question that was meant.
+   It cannot distinguish a player traded in February from one still on the roster,
+   which is why the table prints his last game and lets you see it. */
+function tnLive(r){ return ((r.seasons||[]).slice(-1)[0]||0)===tlRows.maxSy; }
+function dayDiff(a,b){
+  const d=(Date.parse(b+"T12:00:00Z")-Date.parse(a+"T12:00:00Z"))/86400000;
+  return isFinite(d)?Math.round(d):0;
+}
+function yrs(days){
+  const y=Math.floor(days/365.25), m=Math.round((days-y*365.25)/30.44);
+  return y?`${y}y${m?" "+m+"m":""}`:`${m}m`;
+}
+async function showTenure(){
+  setTab("TN");
+  await timelines(); await ensureAliases();
+  const fr=$("tnTeam").value;
+  if(!fr){
+    // Every franchise still active, by how long the current holder has been there.
+    const rost=await roster();
+    const rows=[];
+    for(const key of Object.keys(tlRows.byFr)){
+      const ch=tlChainCache(key);
+      const last=ch[ch.length-1];
+      // Franchises that played in the latest season. A defunct one has no stint
+      // reaching it, so this drops Anderson and Sheboygan without naming them.
+      if(!last||!(tlRows.byFr[key]||[]).some(tnLive))continue;
+      // The contracted holder is the answer when rosters loaded; the games-only
+      // one is kept beside it, because a difference between them IS the news --
+      // it means last season's holder has gone.
+      const now=rost.ok?tnContracted(key,rost):null;
+      const pick=now||last.r;
+      rows.push({key, name:tlRows.frName[key], r:pick,
+                 gone:now&&now.personId!==last.r.personId?last.r:null,
+                 days:dayDiff(pick.first_game,pick.last_game)});
+    }
+    rows.sort((a,b)=>b.days-a.days);
+    let h=`<div class="teamhd">Longest-tenured player at each franchise`
+      + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${rows.length} teams`
+      + ` \u00b7 ${rost.ok?"players still under contract, rosters live from the sheet"
+                            :"games only \u2014 rosters unavailable"}`
+      + ` \u00b7 tenure through ${fmtSeason(tlRows.maxSy)}</small></div>`;
+    // A team code the sheet spells differently would match nothing and fall back
+    // to games only, in silence. Naming it is the difference between a wrong
+    // answer and a fixable one.
+    if(rost.ok){
+      const unmatched=Object.keys(rost.byTeam).filter(t=>!tlRows.byFr[t]);
+      if(unmatched.length)
+        h+=`<div class="sub" style="margin:0 2px 10px;color:var(--red)">`
+          + `${unmatched.length} roster team code(s) match no franchise: `
+          + `<code>${unmatched.map(esc).join("</code> <code>")}</code>`
+          + ` \u2014 those teams fall back to games only. Add them to`
+          + ` <code>data/team_codes.json</code>.</div>`;
+    }
+    h+=`<table><thead><tr><th>#</th><th>Franchise</th><th>Player</th>`
+      + `<th>Since</th><th>Latest game</th><th style="text-align:right">Tenure</th>`
+      + `<th style="text-align:right">Days</th></tr></thead><tbody>`;
+    rows.forEach((x,i)=>{
+      h+=`<tr onclick="tnPick('${esc(x.key)}')" style="cursor:pointer">`
+        + `<td>${i+1}</td><td>${esc(x.name)}</td>`
+        + `<td class="n">${esc(pdisp(x.r.personId,x.r.name))}`
+        + (x.gone?` <small style="color:var(--dim)" title="held it on games played, but the roster no longer has him">was ${esc(pdisp(x.gone.personId,x.gone.name))}</small>`:"")
+        + `</td>`
+        + `<td>${esc(x.r.first_game)}</td><td>${esc(x.r.last_game)}</td>`
+        + `<td style="text-align:right">${yrs(x.days)}</td>`
+        + `<td style="text-align:right">${x.days.toLocaleString()}</td></tr>`;
+    });
+    $("out").innerHTML=h+`</tbody></table>`
+      + `<div class="sub" style="margin:8px 2px">Click a row for that franchise's full succession.</div>`;
+    return;
+  }
+  const ch=tlChainCache(fr);
+  const rost=await roster();
+  const now=rost.ok?tnContracted(fr,rost):null;
+  let h="";
+  if(now){
+    const d=dayDiff(now.first_game,now.last_game);
+    const same=ch.length&&ch[ch.length-1].r.personId===now.personId;
+    h+=`<div class="teamhd">Longest tenured under contract: `
+      + `<span style="color:var(--gold)">${esc(pdisp(now.personId,now.name))}</span>`
+      + `<small style="color:var(--dim);font-weight:400"> \u00b7 since ${esc(now.first_game)}`
+      + ` \u00b7 ${yrs(d)}${same?"":" \u00b7 the games-only holder below has left the franchise"}`
+      + `</small></div>`;
+  }else if(!rost.ok){
+    h+=`<div class="sub" style="margin:0 2px 10px;color:var(--dim)">Current rosters unavailable`
+      + `${rost.err?" ("+esc(rost.err)+")":""} \u2014 the table below is games only, so a player who`
+      + ` signed elsewhere this offseason still appears as the holder.</div>`;
+  }
+  h+=`<div class="teamhd">${esc(tlRows.frName[fr]||fr)} \u2014 longest tenured, in succession`
+    + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${ch.length} holder${ch.length!==1?"s":""}</small></div>`;
+  h+=`<table><thead><tr><th>#</th><th>Player</th><th>Took over</th><th>Until</th>`
+    + `<th style="text-align:right">Held</th><th>Arrived</th>`
+    + `<th style="text-align:right">Tenure at exit</th>`
+    + `<th style="text-align:right">Reg</th><th style="text-align:right">PO</th></tr></thead><tbody>`;
+  ch.slice().reverse().forEach((c,i)=>{
+    const n=ch.length-i;
+    // ONLY THE LAST HOLDER CAN BE CURRENT. Reaching the latest season is not
+    // enough: a holder who was succeeded left, by definition -- that is what
+    // moved the title -- so anyone with a successor gets the date he actually
+    // last played. Garland read as "current" while also handing over in January.
+    const isLast=i===0;
+    const held=dayDiff(c.from,c.to), ten=dayDiff(c.r.first_game,c.r.last_game);
+    // "Arrived" repeats the date only when it differs from the handover -- which
+    // is the interesting case: he was already there, waiting his turn.
+    const arrived=c.r.first_game===c.from?"\u2014":c.r.first_game;
+    h+=`<tr><td>${n}</td>`
+      + `<td class="n"><a href="#" style="color:inherit" onclick="event.preventDefault();showTimeline('${esc(c.r.name).replace(/'/g,"\\'")}')">${esc(pdisp(c.r.personId,c.r.name))}</a></td>`
+      + `<td>${esc(c.from)}</td>`
+      + `<td>${isLast&&tnLive(c.r)
+            ? (now&&now.personId===c.r.personId
+                ? '<span style="color:var(--gold)">current</span>'
+                : esc(c.to)+(rost.ok?' <small style="color:var(--dim)">left</small>':''))
+            : esc(c.to)}</td>`
+      + `<td style="text-align:right">${yrs(held)}</td>`
+      + `<td>${esc(arrived)}</td>`
+      + `<td style="text-align:right">${yrs(ten)}</td>`
+      + `<td style="text-align:right">${c.r.gp_regular??"\u2014"}</td>`
+      + `<td style="text-align:right">${c.r.gp_playoff??"\u2014"}</td></tr>`;
+  });
+  $("out").innerHTML=h+`</tbody></table>`;
+}
+/* ---------- who is under contract ----------
+   Sheet1 of the Trade Machine sheet, through the Worker's /api/rm-roster, which
+   already answers with Access-Control-Allow-Origin:* so this page can read it
+   from github.io without a Worker change. It is the roster Alberto maintains, so
+   it knows things no box score can: Dean Wade signing elsewhere in the offseason
+   happened after the archive's last game and is invisible here otherwise.
 
-    seen = set()                       # (pid, gid), against a re-run appending
-    kinds = collections.Counter()
-    dropped_dnp = 0
-    rows = []
-    for path in files:
-        season_dir = os.path.basename(os.path.dirname(path))
-        dates = {}
-        if not has_date:
-            gpath = os.path.join(os.path.dirname(path), "games.ndjson")
-            if os.path.exists(gpath):
-                grows = read_ndjson(gpath)
-                if grows:
-                    G = detect(grows, need=("gid",))
-                    if "date" in G:
-                        for g in grows:
-                            dates[str(g.get(G["gid"]))] = str(g.get(G["date"]))[:10]
-            if not dates:
-                print(f"  !! {season_dir}: no dates available, skipping")
-                continue
-        raw = read_ndjson(path)
-        # MINUTES WERE NOT RECORDED BEFORE 1951-52, so in the earliest seasons
-        # every row reads as zero and the DNP filter deletes the whole season --
-        # which it silently did, taking Anderson, Sheboygan and Waterloo with it.
-        # Decided per season, and reported: a season that logs no minutes at all
-        # is a season where minutes are unknown, not one where nobody played.
-        drop_dnp = has_min
-        if has_min and raw:
-            z = sum(1 for r in raw if not minutes_of(r.get(F["min"])))
-            if z >= 0.95 * len(raw):
-                drop_dnp = False
-                print(f"    {season_dir}: no minutes recorded this season --"
-                      f" keeping every row")
-        for r in raw:
-            gid = str(r.get(F["gid"]) or "")
-            pid = str(r.get(F["pid"]) or "").strip()
-            if not pid or not gid:
-                continue
-            kind = game_type(gid)
-            kinds[kind] += 1
-            if kind not in COUNTED:
-                continue
-            key = (pid, gid)
-            if key in seen:
-                continue
-            seen.add(key)
-            if drop_dnp and minutes_of(r.get(F["min"])) <= 0:
-                dropped_dnp += 1
-                continue
-            tri = str(r.get(F["team"]) or "").strip().upper()
-            date = (str(r.get(F["date"]))[:10] if has_date
-                    else dates.get(gid, ""))
-            if not date:
-                continue
-            rows.append((pid, date, gid, tri, kind,
-                         str(r.get(F["name"]) or "").strip() if "name" in F else ""))
+   col 0 = name (HoopsHype spelling), col 2 = team, cols 6/8 = 2026-27 salary and
+   status. Names bridge through player_names_reverse.json, HoopsHype -> stats,
+   because the box scores spell them NBA's way.
 
-    print(f"\n  {len(rows)} appearance(s) counted")
-    for k, n in kinds.most_common():
-        mark = "" if k in COUNTED else "   (excluded)"
-        print(f"    {n:>9,}  {k}{mark}")
-    if dropped_dnp:
-        print(f"    {dropped_dnp:>9,}  zero minutes{'':<4}(excluded: on the bench,"
-              f" not in the game)")
-    if kinds.get("unknown"):
-        print("\n  !! unknown game id prefix(es) -- these were EXCLUDED. If they are"
-              "\n     real games, add the prefix to GAME_TYPE.")
-    return rows
+   Fails SOFT. If the endpoint is unreachable the tenure view still works from
+   games alone and says so, rather than showing nothing. */
+function tnCSV(text){
+  const rows=[]; let row=[], cell="", q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=c; }
+    else if(c==='"')q=true;
+    else if(c===","){row.push(cell);cell="";}
+    else if(c==="\n"){row.push(cell);rows.push(row);row=[];cell="";}
+    else if(c!=="\r")cell+=c;
+  }
+  if(cell.length||row.length){row.push(cell);rows.push(row);}
+  return rows;
+}
+let _roster=null;
+async function roster(){
+  if(_roster)return _roster;
+  _roster={byTeam:{}, ok:false, err:"", n:0};
+  try{
+    let rev={};
+    try{
+      const rr=await fetch("data/player_names_reverse.json",{cache:"no-cache"});
+      if(rr.ok)rev=await rr.json();
+    }catch(e){}
+    status("loading current rosters\u2026");
+    const r=await fetch("https://hoopsmatic.com/api/rm-roster",{cache:"no-cache"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const rows=tnCSV(await r.text());
+    for(let i=1;i<rows.length;i++){
+      const w=rows[i]||[];
+      const hh=(w[0]||"").trim(), team=(w[2]||"").trim().toUpperCase();
+      if(!hh||!team)continue;
+      // Under contract for next season, or at least on the roster now. Both are
+      // "still here"; an expiring deal has not left yet.
+      const nm=rev[hh]||hh;
+      (_roster.byTeam[team]=_roster.byTeam[team]||new Set()).add(nm);
+      (_roster.byTeam[team]).add(hh);        // in case the box scores agree already
+      _roster.n++;
+    }
+    _roster.ok=true;
+    status("");
+  }catch(e){ _roster.err=String(e.message||e); status(""); }
+  return _roster;
+}
+/* The holder as of NOW: among players the roster still has at this franchise, the
+   one whose CURRENT stint started earliest. Contract status decides who is
+   eligible; the stint still decides how long he has been there, and a player who
+   left and returned counts from the return because that is his latest stint. */
+function tnContracted(fr, rost){
+  const have=rost.byTeam[fr];
+  if(!have||!have.size)return null;
+  const best={};
+  for(const r of (tlRows.byFr[fr]||[])){
+    if(!have.has(r.name))continue;
+    const cur=best[r.personId];
+    if(!cur||r.first_game>cur.first_game)best[r.personId]=r;   // latest stint
+  }
+  const list=Object.values(best).sort((a,b)=>a.first_game<b.first_game?-1:1);
+  return list[0]||null;
+}
+const _tnCache={};
+function tlChainCache(fr){ return _tnCache[fr]||(_tnCache[fr]=tenureChain(fr)); }
+function tnPick(fr){ $("tnTeam").value=fr; showTenure(); }
+function tnDownload(){
+  const fr=$("tnTeam").value; if(!fr||!tlRows)return;
+  const cols=["seq","player","personId","took_over","until","days_held",
+              "arrived","tenure_days","gp_regular","gp_playoff"];
+  const lines=[cols.join(",")];
+  tlChainCache(fr).forEach((c,i)=>lines.push([i+1,pdisp(c.r.personId,c.r.name),
+    c.r.personId,c.from,c.to,dayDiff(c.from,c.to),c.r.first_game,
+    dayDiff(c.r.first_game,c.r.last_game),c.r.gp_regular,c.r.gp_playoff]
+    .map(_csvCell).join(",")));
+  downloadFile(`tenure_${fr}.csv`,lines.join("\n"),"text/csv;charset=utf-8");
+}
 
+let tlTimer=null;
+$("tlPlayer").addEventListener("input",()=>{
+  clearTimeout(tlTimer);
+  tlTimer=setTimeout(async()=>{
+    const q=$("tlPlayer").value.trim().toLowerCase();
+    if(q.length<2){$("tlSug").style.display="none";return;}
+    await playerIndex();
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)||disp(n).toLowerCase().includes(q)).slice(0,30);
+    $("tlSug").innerHTML=hits.map(n=>{const d=disp(n);return `<div onclick="window.__tlpick('${esc(n).replace(/'/g,"\\'")}')">${esc(d)}${d!==n?` <small style="color:var(--dim)">(${esc(n)})</small>`:""}</div>`;}).join("");
+    $("tlSug").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__tlpick=name=>{$("tlSug").style.display="none";showTimeline(name)};
+$("tabTL").onclick=()=>setTab("TL");
+$("tabTN").onclick=async()=>{
+  setTab("TN");
+  if(!$("tnTeam").dataset.filled){
+    await timelines();
+    const keys=Object.keys(tlRows.byFr)
+      .sort((a,b)=>(tlRows.frName[a]||a).localeCompare(tlRows.frName[b]||b));
+    $("tnTeam").innerHTML=`<option value="">All teams \u2014 who holds it now</option>`
+      + keys.map(k=>`<option value="${esc(k)}">${esc(tlRows.frName[k]||k)}</option>`).join("");
+    $("tnTeam").dataset.filled="1";
+  }
+  showTenure();
+};
+$("tnTeam").addEventListener("change",showTenure);
+$("tnCsv").onclick=tnDownload;
+$("tlCsv").onclick=tlDownload;
+$("tlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
 
-def franchise_of(tri, season):
-    code = normalise(tri, season)
-    key, name = FRANCHISE.get(code, (code or "???", code or "???"))
-    return key, name
-
-
-def build(rows, verbose=False):
-    """-> list of stint dicts, ordered by player then date."""
-    by_player = collections.defaultdict(list)
-    for pid, date, gid, tri, kind, name in rows:
-        by_player[pid].append((date, gid, tri, kind, name))
-
-    unmapped = collections.Counter()
-    stints = []
-    for pid, games in sorted(by_player.items()):
-        # Date first, then game id: two games on one date need a stable order or
-        # a trade day could produce the stints back to front.
-        games.sort(key=lambda g: (g[0], g[1]))
-        name = ""
-        for g in games:
-            if g[4]:
-                name = g[4]
-        cur = None
-        n = 0
-        for date, gid, tri, kind, _nm in games:
-            fkey, fname = franchise_of(tri, season_of(date, gid))
-            if fkey not in FRANCHISE:
-                unmapped[f"{tri} -> {fkey}"] += 1
-            if cur is None or cur["franchise"] != fkey:
-                if cur:
-                    stints.append(cur)
-                n += 1
-                cur = {"personId": pid, "name": name, "franchise": fkey,
-                       "franchise_name": fname, "stint": n,
-                       "tricodes": [tri] if tri else [],
-                       "first_game": date, "first_game_id": gid,
-                       "last_game": date, "last_game_id": gid,
-                       "seasons": [], "gp": 0, "gp_regular": 0, "gp_playoff": 0,
-                       "gp_playin": 0, "gp_cup": 0,
-                       "longest_gap_days": 0, "longest_gap_from": "",
-                       "_prev": date}
-            # WITHIN A SEASON ONLY. Measured across the whole stint, the longest
-            # gap is always the offseason -- a hundred and fifty-odd days every
-            # summer -- which drowns the thing this field exists to surface: a
-            # month-long hole in the middle of a season, where a waiver, a trade
-            # that took a while to debut, or a long injury lives.
-            if season_of(cur["_prev"]) == season_of(date):
-                gap = days_between(cur["_prev"], date)
-                if gap > cur["longest_gap_days"]:
-                    cur["longest_gap_days"] = gap
-                    cur["longest_gap_from"] = cur["_prev"]
-            cur["_prev"] = date
-            if tri and tri not in cur["tricodes"]:
-                cur["tricodes"].append(tri)
-            cur["last_game"], cur["last_game_id"] = date, gid
-            cur["gp"] += 1
-            cur["gp_" + kind] = cur.get("gp_" + kind, 0) + 1
-            s = season_of(date, gid)
-            if s and s not in cur["seasons"]:
-                cur["seasons"].append(s)
-        if cur:
-            stints.append(cur)
-        # The name is only known after every row is seen, so backfill it.
-        for st in stints[-n:] if n else []:
-            st["name"] = name
-
-    newest_season = max((season_of(r[1], r[2]) for r in rows), default=0)
-    for st in stints:
-        st.pop("_prev", None)
-        # BY SEASON, not by days. Ten days from the archive's newest game sounded
-        # reasonable and was useless: on an archive ending at the Finals it was
-        # true for the two finalists and false for the other twenty-eight
-        # franchises, so anything asking "who is there now" got two answers.
-        #
-        # Still not "on the roster" -- a box score cannot know that, and a player
-        # traded in February reads as ongoing for the rest of that season. The
-        # last_game date beside it is what settles those cases.
-        st["ongoing"] = bool(newest_season) and (
-            st["seasons"] and max(st["seasons"]) == newest_season)
-        st["seasons"] = sorted(st["seasons"])
-
-    if unmapped:
-        print(f"\n  !! {len(unmapped)} tricode(s) not in the franchise table --"
-              f" each became its own franchise:")
-        for t, c in unmapped.most_common(12):
-            print(f"     {t}  ({c:,} appearance(s))")
-    return stints
-
-
-def write(stints):
-    cols = ["personId", "name", "franchise", "franchise_name", "stint", "tricodes",
-            "first_game", "first_game_id", "last_game", "last_game_id", "seasons",
-            "gp", "gp_regular", "gp_playoff", "gp_playin", "gp_cup",
-            "longest_gap_days", "longest_gap_from", "ongoing"]
-    tmp = OUT + ".tmp"
-    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-        for st in stints:
-            f.write(json.dumps({k: st.get(k) for k in cols},
-                               ensure_ascii=False, separators=(",", ":")) + "\n")
-    os.replace(tmp, OUT)
-    players = len({s["personId"] for s in stints})
-    print(f"\n  {len(stints):,} stint(s) for {players:,} player(s)"
-          f"\n  -> {os.path.relpath(OUT, ROOT)}")
-
-
-def show(stints, who):
-    """One player's timeline, for checking the file against a career you know."""
-    w = who.strip().lower()
-    hit = [s for s in stints
-           if s["personId"] == who.strip() or w in (s["name"] or "").lower()]
-    if not hit:
-        print(f"\n  no timeline for {who!r}")
-        return
-    names = sorted({s["name"] or s["personId"] for s in hit})
-    if len(names) > 1:
-        print(f"\n  {who!r} matches {len(names)}: {', '.join(names[:8])}")
-    for nm in names:
-        rows = [s for s in hit if (s["name"] or s["personId"]) == nm]
-        rows.sort(key=lambda s: s["first_game"])
-        print(f"\n  {nm}  ({rows[0]['personId']})")
-        print(f"    {'#':>2} {'FRANCHISE':<24} {'FIRST GAME':<12} {'LAST GAME':<12}"
-              f" {'GP':>5} {'PO':>4}  SEASONS")
-        print("    " + "-" * 88)
-        for s in rows:
-            tri = "/".join(s["tricodes"])
-            seas = (f"{s['seasons'][0]}-{s['seasons'][-1]}" if len(s["seasons"]) > 1
-                    else str(s["seasons"][0]) if s["seasons"] else "")
-            gap = (f"   in-season gap {s['longest_gap_days']}d from"
-                   f" {s['longest_gap_from']}" if s["longest_gap_days"] >= 21 else "")
-            print(f"    {s['stint']:>2} {s['franchise_name'][:23]:<24}"
-                  f" {s['first_game']:<12} {s['last_game']:<12}"
-                  f" {s['gp_regular']:>5} {s['gp_playoff']:>4}  {seas}"
-                  f"  [{tri}]{gap}")
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--player", default="", help="name or personId, to print")
-    ap.add_argument("--no-write", action="store_true")
-    ap.add_argument("--verbose", action="store_true")
-    a = ap.parse_args()
-    simple, era = load_team_codes()
-    TEAM_CODES["simple"], TEAM_CODES["era"] = simple, era
-    print(f"  team codes: {len(simple)} simple, {len(era)} era rule(s)")
-    rows = load_rows(a.verbose)
-    stints = build(rows, a.verbose)
-    if not a.no_write:
-        write(stints)
-    if a.player:
-        show(stints, a.player)
-
-
-if __name__ == "__main__":
-    main()
+(function init(){
+  $("buildStamp").textContent="build "+EXPLORER_BUILD;
+  const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
+  $("teamSeason").innerHTML=opts.join("");
+  $("lbFrom").innerHTML=opts.join("");$("lbTo").innerHTML=opts.join("");
+  $("lbFrom").value=FIRST_SY;$("lbTo").value=LAST_SY;
+  const y=new Date();y.setDate(y.getDate()-1);
+  $("dateInput").value=y.toISOString().slice(0,10);
+  fillTeams();
+  onWlHash();
+  // #tl=Name opens a timeline directly, the same way #wl= already works.
+  (async()=>{
+    const p=new URLSearchParams(location.hash.replace(/^#/,""));
+    if(p.has("tl")){await ensureAliases();showTimeline(p.get("tl"));}
+  })();
+})();
+</script>
+</body>
+</html>
