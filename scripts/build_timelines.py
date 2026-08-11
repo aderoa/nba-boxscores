@@ -42,7 +42,7 @@ import glob
 import argparse
 import collections
 
-VERSION = "v1.0.0"
+VERSION = "v1.1.0-ongoing-season"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(ROOT, "data")
@@ -445,12 +445,19 @@ def build(rows, verbose=False):
         for st in stints[-n:] if n else []:
             st["name"] = name
 
-    newest = max((r[1] for r in rows), default="")
+    newest_season = max((season_of(r[1], r[2]) for r in rows), default=0)
     for st in stints:
         st.pop("_prev", None)
-        # Ongoing means "his last appearance is the archive's last word", not
-        # "still on the roster" -- which a box score cannot know.
-        st["ongoing"] = bool(newest) and days_between(st["last_game"], newest) <= 10
+        # BY SEASON, not by days. Ten days from the archive's newest game sounded
+        # reasonable and was useless: on an archive ending at the Finals it was
+        # true for the two finalists and false for the other twenty-eight
+        # franchises, so anything asking "who is there now" got two answers.
+        #
+        # Still not "on the roster" -- a box score cannot know that, and a player
+        # traded in February reads as ongoing for the rest of that season. The
+        # last_game date beside it is what settles those cases.
+        st["ongoing"] = bool(newest_season) and (
+            st["seasons"] and max(st["seasons"]) == newest_season)
         st["seasons"] = sorted(st["seasons"])
 
     if unmapped:
