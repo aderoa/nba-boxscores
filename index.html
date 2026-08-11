@@ -72,6 +72,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
     <button id="tabPlayer">By player</button>
     <button id="tabWL">Player W / L</button>
     <button id="tabLB">Leaderboard</button>
+    <button id="tabTL">Timeline</button>
   </div>
 
   <div class="panel" id="paneDate">
@@ -132,14 +133,27 @@ table.wl td.n{font-family:'Oswald',sans-serif}
     <div class="sub" style="margin:8px 2px 0">Every player's W/L over the season range, sortable. Set <b>Min games</b> to qualify. Sort descending for the top, ascending for the bottom — and when the list is long it shows both ends. Team filter = record with that franchise. Click a player to open their full W/L. (All-time = wide range; loads box scores per season, so start narrow.)</div>
   </div>
 
+  <div class="panel" id="paneTL" style="display:none">
+    <div class="row" style="align-items:flex-end">
+      <div class="suggest" style="flex:1;min-width:240px">
+        <label>Player</label><br>
+        <input type="text" id="tlPlayer" placeholder="start typing a name…" style="width:100%" autocomplete="off">
+        <div class="sugbox" id="tlSug"></div>
+      </div>
+      <button class="go" id="tlCopy">🔗 Link</button>
+      <button class="go" id="tlCsv">⬇ CSV</button>
+    </div>
+    <div class="sub" style="margin:8px 2px 0">Every franchise a player appeared for, in order, with the exact first and last game he played for each &mdash; playoffs included. A player who left and came back gets a row each time. Click a date to open that box score. This is where he <b>played</b>: a signing who never got off the bench leaves no trace, and a first game can fall well after the trade that caused it.</div>
+  </div>
+
   <div class="status" id="status"></div>
   <div id="out"></div>
-  <div class="note"><span id="buildStamp" style="color:var(--gold)"></span><br>Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
+  <div class="note"><span id="buildStamp" style="color:var(--gold)"></span><br>Data: <code>data/{season}/games.ndjson</code> + <code>boxscores.ndjson</code> \u00b7 timelines from <code>data/timelines.ndjson</code> · season files load on demand and are cached for the session. Old-era blanks (—) are real gaps: no rebounds before 1950-51, no minutes before 1951-52, no steals/blocks before 1973-74, no 3PT before 1979-80.</div>
 </div>
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+const EXPLORER_BUILD="v9 \u00b7 Timeline tab \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -644,7 +658,7 @@ window.lbGoto=pid=>{
 // ---------- tabs & init ----------
 function setTab(t){
   activeTab=t;
-  for(const x of["Date","Team","Player","WL","LB"]){
+  for(const x of["Date","Team","Player","WL","LB","TL"]){
     $("tab"+x).classList.toggle("on",x===t);
     $("pane"+x).style.display=x===t?"":"none";
   }
@@ -689,6 +703,124 @@ $("wlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(loca
 $("dateGo").onclick=showDate;
 $("teamGo").onclick=showTeam;
 $("teamSeason").addEventListener("change",fillTeams);
+/* ---------- timeline ----------
+   One row per STINT: a contiguous run of appearances for one franchise, from
+   data/timelines.ndjson, which scripts/build_timelines.py derives from the same
+   box scores this page reads. Grouped by run rather than by team, so LeBron is
+   four rows and three franchises.
+
+   The file is ~5MB and fetched once per session, on first use of this tab rather
+   than at page load -- nobody who came to look up a date should pay for it. */
+let tlName="", tlRows=null;
+async function timelines(){
+  if(!tlRows){
+    status("loading timelines\u2026");
+    const all=await fetchNDJSON("data/timelines.ndjson");
+    tlRows={byName:{},byPid:{}};
+    for(const r of all){
+      (tlRows.byName[r.name]=tlRows.byName[r.name]||[]).push(r);
+      (tlRows.byPid[r.personId]=tlRows.byPid[r.personId]||[]).push(r);
+    }
+    status("");
+  }
+  return tlRows;
+}
+function tlSeasonOf(r,which){
+  const ss=r.seasons||[];
+  return which==="first"?(ss[0]||LAST_SY):(ss[ss.length-1]||LAST_SY);
+}
+async function showTimeline(name){
+  setTab("TL");
+  tlName=name;
+  $("tlPlayer").value=disp(name);
+  const t=await timelines();
+  const rows=t.byName[name]||[];
+  if(!rows.length){
+    $("out").innerHTML=`<div class="teamhd">No timeline for ${esc(disp(name))}</div>`
+      + `<div class="sub" style="margin:8px 2px">Either the name differs in data/timelines.ndjson, or that file predates this player. It is rebuilt by the daily workflow.</div>`;
+    return;
+  }
+  // One block per personId: two players can share a name, and merging them would
+  // invent a career that nobody had.
+  const byPid={};
+  for(const r of rows)(byPid[r.personId]=byPid[r.personId]||[]).push(r);
+  const pids=Object.keys(byPid).sort((x,y)=>
+    (byPid[x][0].first_game<byPid[y][0].first_game?-1:1));
+  let h="";
+  if(pids.length>1)
+    h+=`<div class="sub" style="margin:0 2px 10px">${pids.length} different players have appeared under this name \u2014 one table each.</div>`;
+  for(const pid of pids){
+    const list=byPid[pid].slice().sort((x,y)=>x.first_game<y.first_game?-1:1);
+    const dn=pdisp(pid,list[0].name);
+    const tot=list.reduce((n,r)=>n+(r.gp_regular||0),0);
+    const tpo=list.reduce((n,r)=>n+(r.gp_playoff||0),0);
+    const fr=new Set(list.map(r=>r.franchise)).size;
+    h+=`<div class="teamhd">${esc(dn)}`
+      + `<small style="color:var(--dim);font-weight:400"> \u00b7 id ${esc(pid)}`
+      + ` \u00b7 ${list.length} stint${list.length!==1?"s":""} at ${fr} franchise${fr!==1?"s":""}`
+      + ` \u00b7 ${tot} regular, ${tpo} playoff</small></div>`;
+    h+=`<table><thead><tr><th>#</th><th>Franchise</th><th>First game</th>`
+      + `<th>Last game</th><th>Seasons</th><th style="text-align:right">Reg</th>`
+      + `<th style="text-align:right">PO</th><th>Notes</th></tr></thead><tbody>`;
+    for(const r of list){
+      const sf=tlSeasonOf(r,"first"), sl=tlSeasonOf(r,"last");
+      const link=(d,sy,gid)=>gid
+        ? `<a href="#" style="color:inherit" onclick="event.preventDefault();openGame(${sy},'${esc(gid)}')">${esc(d)}</a>`
+        : esc(d);
+      const ss=r.seasons||[];
+      const seas=ss.length>1?`${fmtSeason(ss[0])} \u2013 ${fmtSeason(ss[ss.length-1])}`
+                : ss.length?fmtSeason(ss[0]):"\u2014";
+      // Tricodes only when they differ from the franchise, so a relocation is
+      // visible without adding noise to the twenty-eight rows that never moved.
+      const tri=(r.tricodes||[]).filter(x=>x!==r.franchise);
+      const notes=[];
+      if(tri.length)notes.push(`<span title="tricode in the box scores">${esc((r.tricodes||[]).join(" \u2192 "))}</span>`);
+      if(r.ongoing)notes.push(`<span style="color:var(--gold)">current</span>`);
+      if(r.longest_gap_days>=21)
+        notes.push(`<span style="color:var(--dim)" title="longest gap between appearances inside one season, from ${esc(r.longest_gap_from)} \u2014 an injury, a waiver, a late debut \u2014 or a league-wide stoppage, which is what the 142-day gaps in 2019-20 are">${r.longest_gap_days}d gap</span>`);
+      h+=`<tr><td>${r.stint}</td><td>${esc(r.franchise_name)}</td>`
+        + `<td>${link(r.first_game,sf,r.first_game_id)}</td>`
+        + `<td>${link(r.last_game,sl,r.last_game_id)}</td>`
+        + `<td>${seas}</td><td style="text-align:right">${r.gp_regular??"\u2014"}</td>`
+        + `<td style="text-align:right">${r.gp_playoff??"\u2014"}</td>`
+        + `<td>${notes.join(" \u00b7 ")}</td></tr>`;
+    }
+    h+=`</tbody></table>`;
+  }
+  $("out").innerHTML=h;
+  const nh="tl="+encodeURIComponent(name);
+  if(location.hash.replace(/^#/,"")!==nh)location.hash=nh;
+}
+function tlDownload(){
+  if(!tlName||!tlRows)return;
+  const rows=(tlRows.byName[tlName]||[]).slice()
+    .sort((x,y)=>x.first_game<y.first_game?-1:1);
+  const cols=["personId","name","franchise","franchise_name","stint","tricodes",
+              "first_game","last_game","seasons","gp_regular","gp_playoff",
+              "longest_gap_days","ongoing"];
+  const lines=[cols.join(",")];
+  for(const r of rows)
+    lines.push(cols.map(c=>_csvCell(Array.isArray(r[c])?r[c].join(" "):r[c])).join(","));
+  downloadFile(`timeline_${tlName.replace(/[^A-Za-z0-9]+/g,"_")}.csv`,
+               lines.join("\n"),"text/csv;charset=utf-8");
+}
+let tlTimer=null;
+$("tlPlayer").addEventListener("input",()=>{
+  clearTimeout(tlTimer);
+  tlTimer=setTimeout(async()=>{
+    const q=$("tlPlayer").value.trim().toLowerCase();
+    if(q.length<2){$("tlSug").style.display="none";return;}
+    await playerIndex();
+    const hits=cache.idxNames.filter(n=>n.toLowerCase().includes(q)||disp(n).toLowerCase().includes(q)).slice(0,30);
+    $("tlSug").innerHTML=hits.map(n=>{const d=disp(n);return `<div onclick="window.__tlpick('${esc(n).replace(/'/g,"\\'")}')">${esc(d)}${d!==n?` <small style="color:var(--dim)">(${esc(n)})</small>`:""}</div>`;}).join("");
+    $("tlSug").style.display=hits.length?"block":"none";
+  },180);
+});
+window.__tlpick=name=>{$("tlSug").style.display="none";showTimeline(name)};
+$("tabTL").onclick=()=>setTab("TL");
+$("tlCsv").onclick=tlDownload;
+$("tlCopy").onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(location.href).then(()=>status("link copied"),()=>{});};
+
 (function init(){
   $("buildStamp").textContent="build "+EXPLORER_BUILD;
   const opts=[];for(let sy=LAST_SY;sy>=FIRST_SY;sy--)opts.push(`<option value="${sy}">${fmtSeason(sy)}</option>`);
@@ -699,6 +831,11 @@ $("teamSeason").addEventListener("change",fillTeams);
   $("dateInput").value=y.toISOString().slice(0,10);
   fillTeams();
   onWlHash();
+  // #tl=Name opens a timeline directly, the same way #wl= already works.
+  (async()=>{
+    const p=new URLSearchParams(location.hash.replace(/^#/,""));
+    if(p.has("tl")){await ensureAliases();showTimeline(p.get("tl"));}
+  })();
 })();
 </script>
 </body>
