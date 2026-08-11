@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Longest-tenured player, day by day — NBA Box Score Database</title>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0b0b1a;--panel:#14142b;--panel2:#1b1b36;--line:#2a2a4d;--tx:#e8e8f4;--dim:#8a8ab0;--gold:#ffd24d}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:'JetBrains Mono',monospace;font-size:13px}
+.wrap{max-width:1060px;margin:0 auto;padding:22px 16px 60px}
+h1{font-family:'Oswald',sans-serif;font-size:26px;letter-spacing:2px;text-transform:uppercase}
+h1 b{color:var(--gold)}
+.sub{color:var(--dim);margin:4px 0 16px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+label{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:1px}
+select,input[type=number]{background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--tx);font-family:inherit;font-size:13px;padding:7px 9px}
+button.go{font-family:'Oswald',sans-serif;letter-spacing:1px;text-transform:uppercase;background:var(--gold);color:#1a1400;border:none;border-radius:8px;padding:9px 20px;font-weight:700;cursor:pointer}
+button.go.off{background:var(--panel2);color:var(--dim);border:1px solid var(--line)}
+input[type=range]{width:100%;accent-color:var(--gold)}
+#clock{font-family:'Oswald',sans-serif;font-size:34px;letter-spacing:2px;color:var(--gold);line-height:1}
+#season{color:var(--dim);font-size:12px}
+#track{position:relative;margin-top:10px}
+.bar{position:absolute;left:0;right:0;height:26px;display:flex;align-items:center;
+     transition:transform .28s linear,opacity .2s linear;will-change:transform}
+.bar .nm{width:190px;flex:0 0 190px;text-align:right;padding-right:9px;white-space:nowrap;
+         overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.bar .fill{height:19px;border-radius:0 4px 4px 0;transition:width .28s linear;min-width:2px}
+.bar .val{padding-left:8px;font-size:12px;color:var(--dim);white-space:nowrap}
+.bar .tm{font-family:'Oswald',sans-serif;font-size:11px;letter-spacing:1px;color:#0b0b1a;
+         padding:0 6px;line-height:19px}
+.note{color:var(--dim);font-size:11px;margin-top:14px;line-height:1.6}
+.err{color:#ff8f6a}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Longest <b>tenured</b>, day by day</h1>
+  <div class="sub">Every franchise's longest-serving player, every day since 1954-55</div>
+
+  <div class="panel">
+    <div class="row">
+      <button class="go" id="play">&#9654; Play</button>
+      <div><label>Speed</label><br>
+        <select id="speed">
+          <option value="1">1 day / frame</option>
+          <option value="3" selected>3 days / frame</option>
+          <option value="7">1 week / frame</option>
+          <option value="15">15 days / frame</option>
+          <option value="30">1 month / frame</option>
+        </select></div>
+      <div><label>Bars</label><br>
+        <select id="topn">
+          <option value="12">Top 12</option>
+          <option value="20" selected>Top 20</option>
+          <option value="40">All teams</option>
+        </select></div>
+      <div><label>Start</label><br>
+        <select id="from">
+          <option value="1954-10-01" selected>1954-55</option>
+          <option value="1970-10-01">1970-71</option>
+          <option value="1990-10-01">1990-91</option>
+          <option value="2010-10-01">2010-11</option>
+        </select></div>
+      <div style="margin-left:auto;text-align:right">
+        <div id="clock">&mdash;</div><div id="season"></div>
+      </div>
+    </div>
+    <div style="margin-top:12px"><input type="range" id="scrub" min="0" max="10000" value="0" step="1"></div>
+  </div>
+
+  <div id="status" class="sub"></div>
+  <div id="track"></div>
+
+  <div class="note">
+    Tenure runs from a player's first game with the franchise to the day shown. A player
+    counts as present while his stint spans that date, so summers are held rather than reset
+    &mdash; and a player who left and came back starts again from the return. This is where
+    players <b>played</b>: a signing who never got off the bench leaves no trace, and an
+    arrival dates from his debut rather than from the trade.<br>
+    Built from <code>data/timelines.ndjson</code>. Ties are common &mdash; a draft class debuts
+    together &mdash; and are broken by who ends up staying longer.
+  </div>
+</div>
+
+<script>
+"use strict";
+const RACE_BUILD="v1.0 \u00b7 2026-08-11";
+const $=id=>document.getElementById(id);
+const ROW=26;
+
+/* Team colours, so a bar can be followed across a decade of reordering. Franchise
+   keys, not tricodes: one colour survives a relocation, which is the whole point
+   of grouping Seattle with Oklahoma City in the first place. */
+const COL={ATL:"#e03a3e",BOS:"#007a33",BKN:"#7a7a92",CHA:"#1d1160",CHI:"#ce1141",
+CLE:"#860038",DAL:"#00538c",DEN:"#0e2240",DET:"#c8102e",GSW:"#1d428a",HOU:"#ce1141",
+IND:"#fdbb30",LAC:"#c8102e",LAL:"#552583",MEM:"#5d76a9",MIA:"#98002e",MIL:"#00471b",
+MIN:"#0c2340",NOP:"#0c2340",NYK:"#f58426",OKC:"#007ac1",ORL:"#0077c0",PHI:"#006bb6",
+PHX:"#e56020",POR:"#e03a3e",SAC:"#5a2d81",SAS:"#a6aaa9",TOR:"#ce1141",UTA:"#002b5c",
+WAS:"#002b5c"};
+const dfl="#4a4a6a";
+
+const D0=s=>Date.parse(s+"T12:00:00Z");
+const iso=t=>new Date(t).toISOString().slice(0,10);
+const DAY=86400000;
+function seasonLabel(t){
+  const d=new Date(t), y=d.getUTCFullYear(), m=d.getUTCMonth();
+  const sy=m>=8?y+1:y;                       // Sep onwards belongs to the next year
+  return (sy-1)+"-"+String(sy).slice(-2);
+}
+
+let SPELLS={}, FRN={}, T0=0, T1=0, t=0, playing=false, raf=null, bars={};
+
+/* The incumbent's succession for one franchise, as dated spells.
+
+   Only one event can change who is longest-serving: the holder's stint ending.
+   Nobody who arrives later can overtake him, so this walks holder to holder
+   rather than sweeping every day -- which is what makes a daily animation cheap
+   enough to run in a browser. */
+function spellsFor(list){
+  const st=list.slice().sort((a,b)=>
+    a.first_game<b.first_game?-1:a.first_game>b.first_game?1:
+    a.last_game>b.last_game?-1:a.last_game<b.last_game?1:0);
+  const used=new Set(), out=[];
+  let cur=null;
+  while(true){
+    const cand=st.filter(x=>!used.has(x)&&(cur===null||x.last_game>cur));
+    if(!cand.length)break;
+    const here=cur===null?cand:(cand.filter(x=>x.first_game<=cur).length
+      ?cand.filter(x=>x.first_game<=cur):cand);
+    const p=here[0];
+    out.push({name:p.name, pid:p.personId,
+              arrived:D0(p.first_game),
+              from:(cur===null||p.first_game>cur)?D0(p.first_game):D0(cur),
+              to:D0(p.last_game)});
+    used.add(p); cur=p.last_game;
+  }
+  return out;
+}
+
+async function load(){
+  $("status").textContent="loading timelines\u2026";
+  let rows;
+  try{
+    const r=await fetch("data/timelines.ndjson",{cache:"no-cache"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    rows=(await r.text()).split("\n").filter(s=>s.trim()).map(JSON.parse);
+  }catch(e){
+    $("status").innerHTML=`<span class="err">could not load data/timelines.ndjson (${e.message})`
+      +` \u2014 this page expects to sit beside it in the repo.</span>`;
+    return;
+  }
+  const byFr={};
+  for(const r of rows){
+    (byFr[r.franchise]=byFr[r.franchise]||[]).push(r);
+    FRN[r.franchise]=r.franchise_name;
+  }
+  let last=0;
+  for(const fr in byFr){
+    SPELLS[fr]={list:spellsFor(byFr[fr]), i:0};
+    for(const s of SPELLS[fr].list) if(s.to>last) last=s.to;
+  }
+  T1=last;
+  // One bar per franchise, created once. Reordering is a transform on an existing
+  // node, so nothing is built or destroyed while the race runs.
+  const track=$("track");
+  for(const fr of Object.keys(SPELLS)){
+    const b=document.createElement("div");
+    b.className="bar"; b.style.opacity=0; b.style.transform="translateY(0px)";
+    b.innerHTML=`<div class="nm"></div>`
+      + `<div class="fill" style="background:${COL[fr]||dfl}"><span class="tm">${fr}</span></div>`
+      + `<div class="val"></div>`;
+    track.appendChild(b);
+    bars[fr]={el:b, nm:b.querySelector(".nm"), fill:b.querySelector(".fill"),
+              val:b.querySelector(".val")};
+  }
+  $("status").textContent=`${rows.length.toLocaleString()} stints \u00b7 `
+    + `${Object.keys(SPELLS).length} franchises \u00b7 through ${iso(T1)}`;
+  reset();
+}
+
+function reset(){
+  T0=D0($("from").value);
+  if(T0<D0("1946-11-01"))T0=D0("1946-11-01");
+  t=T0;
+  for(const fr in SPELLS)SPELLS[fr].i=0;
+  $("scrub").value=0;
+  frame();
+}
+
+/* Who holds it at time t, per franchise. The pointer only moves forward, so
+   scrubbing backwards has to rewind it -- otherwise a spell that has already
+   been passed can never be found again. */
+function holdersAt(when, rewind){
+  const out=[];
+  for(const fr in SPELLS){
+    const S=SPELLS[fr];
+    if(rewind)S.i=0;
+    while(S.i<S.list.length-1 && S.list[S.i].to<when)S.i++;
+    const s=S.list[S.i];
+    if(s && s.from<=when && when<=s.to)
+      out.push({fr, name:s.name, yrs:(when-s.arrived)/DAY/365.25});
+  }
+  out.sort((a,b)=>b.yrs-a.yrs);
+  return out;
+}
+
+let lastT=-1;
+function frame(){
+  const rewind = t<lastT; lastT=t;
+  const list=holdersAt(t, rewind);
+  const cap=+$("topn").value;
+  const max=list.length?list[0].yrs:1;
+  const shown=list.slice(0,cap);
+  const seen=new Set();
+  shown.forEach((h,i)=>{
+    const b=bars[h.fr]; if(!b)return;
+    seen.add(h.fr);
+    b.el.style.transform=`translateY(${i*ROW}px)`;
+    b.el.style.opacity=1;
+    b.nm.textContent=h.name;
+    b.fill.style.width=Math.max(2,(h.yrs/max)*100*0.62)+"%";
+    b.val.textContent=h.yrs.toFixed(1)+"y";
+  });
+  for(const fr in bars) if(!seen.has(fr)) bars[fr].el.style.opacity=0;
+  $("track").style.height=(shown.length*ROW+8)+"px";
+  $("clock").textContent=iso(t);
+  $("season").textContent=seasonLabel(t)+" \u00b7 "+list.length+" teams";
+  const span=T1-T0;
+  if(span>0)$("scrub").value=Math.round(((t-T0)/span)*10000);
+}
+
+function tick(){
+  if(!playing)return;
+  t+=(+$("speed").value)*DAY;
+  if(t>=T1){t=T1;frame();stop();return;}
+  frame();
+  raf=setTimeout(tick,60);
+}
+function stop(){playing=false;$("play").innerHTML="&#9654; Play";$("play").classList.remove("off");clearTimeout(raf);}
+$("play").onclick=()=>{
+  if(playing){stop();return;}
+  if(t>=T1)reset();
+  playing=true;$("play").innerHTML="&#10074;&#10074; Pause";$("play").classList.add("off");tick();
+};
+$("scrub").oninput=()=>{
+  stop();
+  t=T0+((+$("scrub").value)/10000)*(T1-T0);
+  frame();
+};
+$("from").onchange=()=>{stop();reset();};
+$("topn").onchange=frame;
+load();
+</script>
+</body>
+</html>
