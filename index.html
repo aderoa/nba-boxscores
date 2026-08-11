@@ -162,7 +162,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v11 \u00b7 tenure vs current contracts \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+const EXPLORER_BUILD="v12 \u00b7 free agents count as gone \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -894,13 +894,21 @@ async function showTenure(){
     rows.sort((a,b)=>b.days-a.days);
     let h=`<div class="teamhd">Longest-tenured player at each franchise`
       + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${rows.length} teams`
-      + ` \u00b7 ${rost.ok?"players still under contract, rosters live from the sheet"
+      + ` \u00b7 ${rost.ok?`${rost.n} players under contract, ${rost.fa} free agent(s) excluded`
                             :"games only \u2014 rosters unavailable"}`
       + ` \u00b7 tenure through ${fmtSeason(tlRows.maxSy)}</small></div>`;
     // A team code the sheet spells differently would match nothing and fall back
     // to games only, in silence. Naming it is the difference between a wrong
     // answer and a fixable one.
     if(rost.ok){
+      const noMatch=Object.keys(rost.byTeam)
+        .filter(t=>tlRows.byFr[t]&&!tnContracted(t,rost));
+      if(noMatch.length)
+        h+=`<div class="sub" style="margin:0 2px 10px;color:var(--red)">`
+          + `${noMatch.length} franchise(s) have a contracted roster but no name`
+          + ` matched the box scores: <code>${noMatch.map(esc).join("</code> <code>")}</code>`
+          + ` \u2014 a spelling the name bridge does not cover. Those fall back to`
+          + ` games only.</div>`;
       const unmatched=Object.keys(rost.byTeam).filter(t=>!tlRows.byFr[t]);
       if(unmatched.length)
         h+=`<div class="sub" style="margin:0 2px 10px;color:var(--red)">`
@@ -916,7 +924,7 @@ async function showTenure(){
       h+=`<tr onclick="tnPick('${esc(x.key)}')" style="cursor:pointer">`
         + `<td>${i+1}</td><td>${esc(x.name)}</td>`
         + `<td class="n">${esc(pdisp(x.r.personId,x.r.name))}`
-        + (x.gone?` <small style="color:var(--dim)" title="held it on games played, but the roster no longer has him">was ${esc(pdisp(x.gone.personId,x.gone.name))}</small>`:"")
+        + (x.gone?` <small style="color:var(--dim)" title="held it on games played, but is no longer under contract here \u2014 traded, or a free agent">was ${esc(pdisp(x.gone.personId,x.gone.name))}</small>`:"")
         + `</td>`
         + `<td>${esc(x.r.first_game)}</td><td>${esc(x.r.last_game)}</td>`
         + `<td style="text-align:right">${yrs(x.days)}</td>`
@@ -1005,7 +1013,7 @@ function tnCSV(text){
 let _roster=null;
 async function roster(){
   if(_roster)return _roster;
-  _roster={byTeam:{}, ok:false, err:"", n:0};
+  _roster={byTeam:{}, ok:false, err:"", n:0, fa:0};
   try{
     let rev={};
     try{
@@ -1020,8 +1028,16 @@ async function roster(){
       const w=rows[i]||[];
       const hh=(w[0]||"").trim(), team=(w[2]||"").trim().toUpperCase();
       if(!hh||!team)continue;
-      // Under contract for next season, or at least on the roster now. Both are
-      // "still here"; an expiring deal has not left yet.
+      // UNDER CONTRACT, which is not the same as being listed. Sheet1 keeps a
+      // free agent under his old team -- that is how the Trade Machine works out
+      // his cap hold -- so simply appearing here kept Dwight Powell as Dallas's
+      // holder and Dean Wade as Cleveland's after both had gone.
+      //
+      // The test is the Roster Manager's own: no 2026-27 salary AND no 2026-27
+      // status means free agent. An option or a non-guaranteed year still counts,
+      // because a contractual tie is a tie.
+      const sal27=(w[6]||"").replace(/[^0-9.]/g,""), st27=(w[8]||"").trim();
+      if(!(parseFloat(sal27)>0)&&!st27){ _roster.fa++; continue; }
       const nm=rev[hh]||hh;
       (_roster.byTeam[team]=_roster.byTeam[team]||new Set()).add(nm);
       (_roster.byTeam[team]).add(hh);        // in case the box scores agree already
