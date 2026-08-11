@@ -162,7 +162,7 @@ table.wl td.n{font-family:'Oswald',sans-serif}
 
 <script>
 "use strict";
-const EXPLORER_BUILD="v10 \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
+const EXPLORER_BUILD="v11 \u00b7 tenure vs current contracts \u00b7 Timeline + Longest tenured \u00b7 2026-08-11 | was: v8j · bar-race CSV columns use season-end year (2002) instead of 2001-02 · 2026-07-03";
 console.log("[EXPLORER]",EXPLORER_BUILD);
 const $=id=>document.getElementById(id);
 const FIRST_SY=1947, LAST_SY=(()=>{const n=new Date();return n.getMonth()>=8?n.getFullYear()+1:n.getFullYear()})();
@@ -874,6 +874,7 @@ async function showTenure(){
   const fr=$("tnTeam").value;
   if(!fr){
     // Every franchise still active, by how long the current holder has been there.
+    const rost=await roster();
     const rows=[];
     for(const key of Object.keys(tlRows.byFr)){
       const ch=tlChainCache(key);
@@ -881,20 +882,42 @@ async function showTenure(){
       // Franchises that played in the latest season. A defunct one has no stint
       // reaching it, so this drops Anderson and Sheboygan without naming them.
       if(!last||!(tlRows.byFr[key]||[]).some(tnLive))continue;
-      rows.push({key, name:tlRows.frName[key], r:last.r,
-                 days:dayDiff(last.r.first_game,last.r.last_game)});
+      // The contracted holder is the answer when rosters loaded; the games-only
+      // one is kept beside it, because a difference between them IS the news --
+      // it means last season's holder has gone.
+      const now=rost.ok?tnContracted(key,rost):null;
+      const pick=now||last.r;
+      rows.push({key, name:tlRows.frName[key], r:pick,
+                 gone:now&&now.personId!==last.r.personId?last.r:null,
+                 days:dayDiff(pick.first_game,pick.last_game)});
     }
     rows.sort((a,b)=>b.days-a.days);
     let h=`<div class="teamhd">Longest-tenured player at each franchise`
       + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${rows.length} teams`
-      + ` \u00b7 as of ${fmtSeason(tlRows.maxSy)}</small></div>`;
+      + ` \u00b7 ${rost.ok?"players still under contract, rosters live from the sheet"
+                            :"games only \u2014 rosters unavailable"}`
+      + ` \u00b7 tenure through ${fmtSeason(tlRows.maxSy)}</small></div>`;
+    // A team code the sheet spells differently would match nothing and fall back
+    // to games only, in silence. Naming it is the difference between a wrong
+    // answer and a fixable one.
+    if(rost.ok){
+      const unmatched=Object.keys(rost.byTeam).filter(t=>!tlRows.byFr[t]);
+      if(unmatched.length)
+        h+=`<div class="sub" style="margin:0 2px 10px;color:var(--red)">`
+          + `${unmatched.length} roster team code(s) match no franchise: `
+          + `<code>${unmatched.map(esc).join("</code> <code>")}</code>`
+          + ` \u2014 those teams fall back to games only. Add them to`
+          + ` <code>data/team_codes.json</code>.</div>`;
+    }
     h+=`<table><thead><tr><th>#</th><th>Franchise</th><th>Player</th>`
       + `<th>Since</th><th>Latest game</th><th style="text-align:right">Tenure</th>`
       + `<th style="text-align:right">Days</th></tr></thead><tbody>`;
     rows.forEach((x,i)=>{
       h+=`<tr onclick="tnPick('${esc(x.key)}')" style="cursor:pointer">`
         + `<td>${i+1}</td><td>${esc(x.name)}</td>`
-        + `<td class="n">${esc(pdisp(x.r.personId,x.r.name))}</td>`
+        + `<td class="n">${esc(pdisp(x.r.personId,x.r.name))}`
+        + (x.gone?` <small style="color:var(--dim)" title="held it on games played, but the roster no longer has him">was ${esc(pdisp(x.gone.personId,x.gone.name))}</small>`:"")
+        + `</td>`
         + `<td>${esc(x.r.first_game)}</td><td>${esc(x.r.last_game)}</td>`
         + `<td style="text-align:right">${yrs(x.days)}</td>`
         + `<td style="text-align:right">${x.days.toLocaleString()}</td></tr>`;
@@ -904,7 +927,23 @@ async function showTenure(){
     return;
   }
   const ch=tlChainCache(fr);
-  let h=`<div class="teamhd">${esc(tlRows.frName[fr]||fr)} \u2014 longest tenured, in succession`
+  const rost=await roster();
+  const now=rost.ok?tnContracted(fr,rost):null;
+  let h="";
+  if(now){
+    const d=dayDiff(now.first_game,now.last_game);
+    const same=ch.length&&ch[ch.length-1].r.personId===now.personId;
+    h+=`<div class="teamhd">Longest tenured under contract: `
+      + `<span style="color:var(--gold)">${esc(pdisp(now.personId,now.name))}</span>`
+      + `<small style="color:var(--dim);font-weight:400"> \u00b7 since ${esc(now.first_game)}`
+      + ` \u00b7 ${yrs(d)}${same?"":" \u00b7 the games-only holder below has left the franchise"}`
+      + `</small></div>`;
+  }else if(!rost.ok){
+    h+=`<div class="sub" style="margin:0 2px 10px;color:var(--dim)">Current rosters unavailable`
+      + `${rost.err?" ("+esc(rost.err)+")":""} \u2014 the table below is games only, so a player who`
+      + ` signed elsewhere this offseason still appears as the holder.</div>`;
+  }
+  h+=`<div class="teamhd">${esc(tlRows.frName[fr]||fr)} \u2014 longest tenured, in succession`
     + `<small style="color:var(--dim);font-weight:400"> \u00b7 ${ch.length} holder${ch.length!==1?"s":""}</small></div>`;
   h+=`<table><thead><tr><th>#</th><th>Player</th><th>Took over</th><th>Until</th>`
     + `<th style="text-align:right">Held</th><th>Arrived</th>`
@@ -912,6 +951,11 @@ async function showTenure(){
     + `<th style="text-align:right">Reg</th><th style="text-align:right">PO</th></tr></thead><tbody>`;
   ch.slice().reverse().forEach((c,i)=>{
     const n=ch.length-i;
+    // ONLY THE LAST HOLDER CAN BE CURRENT. Reaching the latest season is not
+    // enough: a holder who was succeeded left, by definition -- that is what
+    // moved the title -- so anyone with a successor gets the date he actually
+    // last played. Garland read as "current" while also handing over in January.
+    const isLast=i===0;
     const held=dayDiff(c.from,c.to), ten=dayDiff(c.r.first_game,c.r.last_game);
     // "Arrived" repeats the date only when it differs from the handover -- which
     // is the interesting case: he was already there, waiting his turn.
@@ -919,7 +963,11 @@ async function showTenure(){
     h+=`<tr><td>${n}</td>`
       + `<td class="n"><a href="#" style="color:inherit" onclick="event.preventDefault();showTimeline('${esc(c.r.name).replace(/'/g,"\\'")}')">${esc(pdisp(c.r.personId,c.r.name))}</a></td>`
       + `<td>${esc(c.from)}</td>`
-      + `<td>${tnLive(c.r)?'<span style="color:var(--gold)">current</span>':esc(c.to)}</td>`
+      + `<td>${isLast&&tnLive(c.r)
+            ? (now&&now.personId===c.r.personId
+                ? '<span style="color:var(--gold)">current</span>'
+                : esc(c.to)+(rost.ok?' <small style="color:var(--dim)">left</small>':''))
+            : esc(c.to)}</td>`
       + `<td style="text-align:right">${yrs(held)}</td>`
       + `<td>${esc(arrived)}</td>`
       + `<td style="text-align:right">${yrs(ten)}</td>`
@@ -927,6 +975,78 @@ async function showTenure(){
       + `<td style="text-align:right">${c.r.gp_playoff??"\u2014"}</td></tr>`;
   });
   $("out").innerHTML=h+`</tbody></table>`;
+}
+/* ---------- who is under contract ----------
+   Sheet1 of the Trade Machine sheet, through the Worker's /api/rm-roster, which
+   already answers with Access-Control-Allow-Origin:* so this page can read it
+   from github.io without a Worker change. It is the roster Alberto maintains, so
+   it knows things no box score can: Dean Wade signing elsewhere in the offseason
+   happened after the archive's last game and is invisible here otherwise.
+
+   col 0 = name (HoopsHype spelling), col 2 = team, cols 6/8 = 2026-27 salary and
+   status. Names bridge through player_names_reverse.json, HoopsHype -> stats,
+   because the box scores spell them NBA's way.
+
+   Fails SOFT. If the endpoint is unreachable the tenure view still works from
+   games alone and says so, rather than showing nothing. */
+function tnCSV(text){
+  const rows=[]; let row=[], cell="", q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){ if(c==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=c; }
+    else if(c==='"')q=true;
+    else if(c===","){row.push(cell);cell="";}
+    else if(c==="\n"){row.push(cell);rows.push(row);row=[];cell="";}
+    else if(c!=="\r")cell+=c;
+  }
+  if(cell.length||row.length){row.push(cell);rows.push(row);}
+  return rows;
+}
+let _roster=null;
+async function roster(){
+  if(_roster)return _roster;
+  _roster={byTeam:{}, ok:false, err:"", n:0};
+  try{
+    let rev={};
+    try{
+      const rr=await fetch("data/player_names_reverse.json",{cache:"no-cache"});
+      if(rr.ok)rev=await rr.json();
+    }catch(e){}
+    status("loading current rosters\u2026");
+    const r=await fetch("https://hoopsmatic.com/api/rm-roster",{cache:"no-cache"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const rows=tnCSV(await r.text());
+    for(let i=1;i<rows.length;i++){
+      const w=rows[i]||[];
+      const hh=(w[0]||"").trim(), team=(w[2]||"").trim().toUpperCase();
+      if(!hh||!team)continue;
+      // Under contract for next season, or at least on the roster now. Both are
+      // "still here"; an expiring deal has not left yet.
+      const nm=rev[hh]||hh;
+      (_roster.byTeam[team]=_roster.byTeam[team]||new Set()).add(nm);
+      (_roster.byTeam[team]).add(hh);        // in case the box scores agree already
+      _roster.n++;
+    }
+    _roster.ok=true;
+    status("");
+  }catch(e){ _roster.err=String(e.message||e); status(""); }
+  return _roster;
+}
+/* The holder as of NOW: among players the roster still has at this franchise, the
+   one whose CURRENT stint started earliest. Contract status decides who is
+   eligible; the stint still decides how long he has been there, and a player who
+   left and returned counts from the return because that is his latest stint. */
+function tnContracted(fr, rost){
+  const have=rost.byTeam[fr];
+  if(!have||!have.size)return null;
+  const best={};
+  for(const r of (tlRows.byFr[fr]||[])){
+    if(!have.has(r.name))continue;
+    const cur=best[r.personId];
+    if(!cur||r.first_game>cur.first_game)best[r.personId]=r;   // latest stint
+  }
+  const list=Object.values(best).sort((a,b)=>a.first_game<b.first_game?-1:1);
+  return list[0]||null;
 }
 const _tnCache={};
 function tlChainCache(fr){ return _tnCache[fr]||(_tnCache[fr]=tenureChain(fr)); }
