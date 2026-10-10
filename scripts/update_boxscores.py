@@ -61,11 +61,11 @@ import json
 import time
 import argparse
 import subprocess
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
-VERSION = "v2.0.0-stats-local"
+VERSION = "v2.0.1-stats-local"
 
 try:
     from zoneinfo import ZoneInfo
@@ -99,6 +99,14 @@ POLITE_DELAY = 1.5          # stats.nba.com punishes haste
 
 
 def log(m): print(m, flush=True)
+
+
+def utc_stamp():
+    """'2026-10-10T22:47:27.702068Z' — the shape state.json already carries,
+    via a timezone-aware clock. datetime.utcnow() is deprecated in 3.12 and
+    goes away later, and isoformat() on an aware object would otherwise write
+    '+00:00' where every existing row ends in 'Z'."""
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
 
 # ------------------------------------------------------------------ fetch
@@ -140,7 +148,8 @@ def result_rows(payload):
 def today_et():
     if ET:
         return datetime.now(ET).date()
-    return (datetime.utcnow() - timedelta(hours=5)).date()
+    return (datetime.now(timezone.utc).replace(tzinfo=None)
+            - timedelta(hours=5)).date()
 
 
 def num(v):
@@ -301,12 +310,12 @@ def main():
         return 2
     log(f"  repo: {root}")
 
-    run = {"version": VERSION, "started_utc": datetime.utcnow().isoformat() + "Z",
+    run = {"version": VERSION, "started_utc": utc_stamp(),
            "ok": False, "error": None, "dry_run": a.dry_run,
            "seasons": {}, "games_added": 0, "rows_added": 0}
 
     def finish(code):
-        run["finished_utc"] = datetime.utcnow().isoformat() + "Z"
+        run["finished_utc"] = utc_stamp()
         run["ok"] = (code == 0)
         try:
             with open(os.path.join(root, "last_run.json"), "w",
@@ -461,7 +470,7 @@ def main():
     else:
         with open(state_path, "w", encoding="utf-8") as f:
             json.dump({"last_processed_date": end.isoformat(),
-                       "updated_at": datetime.utcnow().isoformat() + "Z"},
+                       "updated_at": utc_stamp()},
                       f, indent=2)
         log(f"  state -> {end.isoformat()}")
 
