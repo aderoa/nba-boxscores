@@ -25,19 +25,30 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Run updater
-        run: python scripts/update_boxscores.py
+      # The updater no longer runs here, and cannot. As of 2026-10-10
+      # cdn.nba.com (the v1 source) answers 403 to every client on every
+      # network, including Chrome on a residential connection -- an Akamai
+      # access rule, not a bot challenge. The only surviving source is
+      # stats.nba.com leaguegamelog, which refuses datacenter IPs and so
+      # refuses this runner. update_boxscores.py v2 therefore runs on
+      # Alberto's machine and pushes from there.
+      #
+      # What a runner CAN still do is notice that nobody has run it. A laptop
+      # left off for a fortnight in January produces exactly the same repo as
+      # a healthy off-season, so this reads state.json and goes red when the
+      # archive falls behind during a season. No network needed.
+      - name: Archive freshness gate
+        run: python scripts/check_freshness.py
 
       # Rebuilt from the whole archive every run, not appended to. A stint's last
       # game moves when a player plays again and its first game moves when a fix
       # lands in an old season, so there is nothing to append to -- and the whole
       # pass is about a minute against eighty seasons, which is cheaper than
       # working out what changed.
-      # ALWAYS, even when the updater above failed. The timelines are derived
-      # from the seasons already committed here and touch no network, so a fetch
-      # failure upstream is no reason to skip them -- and while cdn.nba.com is
-      # answering 403 to Actions runners, "the updater failed" is the normal case.
-      # The job still reports failure, so the 403 does not go quiet.
+      # ALWAYS, even when the gate above went red. The timelines are derived
+      # from the seasons already committed here and touch no network, so a
+      # stale archive is no reason to skip rebuilding them. The job still
+      # reports failure, so a stale archive does not go quiet.
       - name: Build player timelines
         if: always()
         run: python scripts/build_timelines.py

@@ -1,115 +1,174 @@
 #!/usr/bin/env python3
 """
-NBA all-time box score database — daily updater.
+NBA all-time box score database — daily updater.  v2.0.0-stats-local
 
-Designed to run on GitHub Actions (cron) where stats.nba.com is unreliable
-from datacenter IPs. Uses ONLY cdn.nba.com static endpoints:
+SOURCE CHANGED, AND SO DID WHERE THIS RUNS.
 
-  schedule (full season, all games + statuses):
-    https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json
-    https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json   (fallback)
+v1 used cdn.nba.com static endpoints exclusively, deliberately, because
+stats.nba.com is unreachable from datacenter IPs. On 2026-10-10 that bargain
+collapsed: cdn.nba.com answers 403 to EVERYTHING -- python urllib, curl,
+curl --http2, node fetch, and Chrome on a residential connection. It is an
+Akamai access rule (reference prefix 18., errors.edgesuite.net), not a bot
+challenge, so no client or header set gets around it. Measured the same hour:
 
-  per-game box score (player-level, persists after the game):
-    https://cdn.nba.com/static/json/liveData/boxscore/boxscore_{gameId}.json
+    cdn.nba.com  staticData schedule        403   (was the v1 schedule source)
+    cdn.nba.com  liveData boxscore          403   (was the v1 box source)
+    cdn.nba.com  logos/*.svg                200   (unaffected; pages are fine)
+    stats.nba.com leaguegamelog             200   from a residential IP
+    stats.nba.com leaguegamelog             ---   refused from a GH runner
 
-Data layout (NDJSON: one JSON object per line — clean git diffs, daily
-updates are pure line-appends):
+So the only surviving source is the one that will not run on Actions. This
+script therefore runs LOCALLY and pushes, the way backfill_boxscores.py
+already does. daily.yml keeps building timelines from committed data, which
+needs no network.
 
-  data/{seasonEndYear}/games.ndjson      one line per game
-  data/{seasonEndYear}/boxscores.ndjson  one line per player-game row
-  state.json                             {"last_processed_date": "YYYY-MM-DD"}
+WHAT IT FETCHES NOW
 
-Idempotent + self-healing: walks every ET date from state date (exclusive)
-through yesterday (inclusive); games already present are skipped, so a
-failed or missed run simply catches up on the next one.
+leaguegamelog, exactly as backfill_boxscores.py does -- two requests per
+season-type for the whole window, not one per game:
+
+    .../stats/leaguegamelog?PlayerOrTeam=T&Season=2026-27&SeasonType=...&DateFrom=...
+    .../stats/leaguegamelog?PlayerOrTeam=P&...
+
+Team rows build games.ndjson, player rows build boxscores.ndjson. Row shape
+is byte-identical to the backfill's, which means the two differ from v1 in
+one way worth knowing: leaguegamelog carries no `pos` or `starter`, so those
+keys are absent, as they already are for every backfilled season.
+
+SEASON TYPES: Regular Season, PlayIn, Playoffs -- matching the backfill.
+Preseason is NOT ingested by default and must never be, silently: these
+files feed Global Rating season totals, and exhibition games would quietly
+inflate them. --preseason exists for deliberate experiments and says so.
+
+  python update_boxscores.py                  incremental since state.json
+  python update_boxscores.py --dry-run        fetch and report, write nothing
+  python update_boxscores.py --preseason --dry-run
+        tonight's exhibition games as a live test of the whole path, with no
+        risk to the archive -- the only way to test this before 2026-10-21
+  python update_boxscores.py --since 2026-10-21 --no-push
+  python update_boxscores.py --repo D:\\repos\\nba-boxscores
+        when this script is run from a copy outside the repo
+
+Writes last_run.json on EVERY attempt and exits non-zero on failure, because
+the fault this replaces was invisible for two months: the updater failed on
+every run while the workflow stayed green and the data simply stopped.
 """
 
-import json, os, re, sys, time
-from datetime import date, datetime, timedelta
+import os
+import re
+import sys
+import json
+import time
+import argparse
+import subprocess
+from datetime import date, datetime, timedelta, timezone
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
+VERSION = "v2.0.1-stats-local"
+
 try:
-    from zoneinfo import ZoneInfo  # py3.9+
+    from zoneinfo import ZoneInfo
     ET = ZoneInfo("America/New_York")
 except Exception:
     ET = None
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(ROOT, "data")
-STATE_PATH = os.path.join(ROOT, "state.json")
+LGL_URL = ("https://stats.nba.com/stats/leaguegamelog?Counter=0&Direction=ASC"
+           "&LeagueID=00&PlayerOrTeam={pot}&Season={season}&SeasonType={stype}"
+           "&Sorter=DATE")
 
-SCHEDULE_URLS = [
-    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2_1.json",
-    "https://cdn.nba.com/static/json/staticData/scheduleLeagueV2.json",
-]
-BOXSCORE_URL = "https://cdn.nba.com/static/json/liveData/boxscore/boxscore_{gid}.json"
-
-# cdn.nba.com sits behind Akamai, which 403s datacenter IPs presenting
-# non-browser UAs. A full browser-like header set passes.
-UA = {
+# Verbatim from backfill_boxscores.py, which is the request shape proven to
+# work from this machine. stats.nba.com refuses anything less.
+HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
     "Referer": "https://www.nba.com/",
     "Origin": "https://www.nba.com",
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9",
+    "x-nba-stats-origin": "stats",
+    "x-nba-stats-token": "true",
     "Connection": "keep-alive",
 }
 
-MAX_GAMES_PER_RUN = 250        # safety bound on catch-up bursts
-FETCH_RETRIES = 3
-RETRY_SLEEP = 4                # seconds, doubled per retry
-POLITE_DELAY = 0.6             # between box score fetches
+STYPES = ["Regular Season", "PlayIn", "Playoffs"]
+PRESEASON = "Pre Season"
+FETCH_RETRIES = 4
+RETRY_SLEEP = 5
+POLITE_DELAY = 1.5          # stats.nba.com punishes haste
 
 
-# ---------------------------------------------------------------- helpers
+def log(m): print(m, flush=True)
 
-def log(msg):
-    print(msg, flush=True)
+
+def utc_stamp():
+    """'2026-10-10T22:47:27.702068Z' — the shape state.json already carries,
+    via a timezone-aware clock. datetime.utcnow() is deprecated in 3.12 and
+    goes away later, and isoformat() on an aware object would otherwise write
+    '+00:00' where every existing row ends in 'Z'."""
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+
+
+# ------------------------------------------------------------------ fetch
+
+class FetchError(RuntimeError):
+    def __init__(self, url, last):
+        self.url = url; self.last = last
+        self.status = getattr(last, "code", None)
+        super().__init__(f"fetch failed: {url} ({last})")
+
 
 def fetch_json(url):
-    last_err = None
-    for attempt in range(FETCH_RETRIES):
+    last = None
+    for i in range(FETCH_RETRIES):
         try:
-            req = Request(url, headers=UA)
-            with urlopen(req, timeout=30) as r:
+            with urlopen(Request(url, headers=HEADERS), timeout=60) as r:
                 return json.loads(r.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as e:
-            last_err = e
-            # 404 on a box score won't heal by retrying
-            if isinstance(e, HTTPError) and e.code == 404:
-                break
-            time.sleep(RETRY_SLEEP * (2 ** attempt))
-    raise RuntimeError(f"fetch failed: {url} ({last_err})")
+            last = e
+            if isinstance(e, HTTPError) and e.code in (400, 404):
+                break                      # a bad season/type will not heal
+            time.sleep(RETRY_SLEEP * (i + 1))
+    raise FetchError(url, last)
+
+
+def result_rows(payload):
+    """stats.nba.com resultSets -> (headers, rowSet). Empty is legitimate:
+    Playoffs in October simply has no rows yet."""
+    rs = payload.get("resultSets") or payload.get("resultSet") or []
+    if isinstance(rs, dict):
+        rs = [rs]
+    if not rs:
+        return [], []
+    return (rs[0].get("headers") or []), (rs[0].get("rowSet") or [])
+
+
+# ------------------------------------------------------------------ helpers
 
 def today_et():
     if ET:
         return datetime.now(ET).date()
-    return (datetime.utcnow() - timedelta(hours=5)).date()  # crude ET fallback
+    return (datetime.now(timezone.utc).replace(tzinfo=None)
+            - timedelta(hours=5)).date()
 
-def parse_iso_minutes(s):
-    """liveData minutes come as ISO durations like 'PT34M12.00S'."""
-    if not s:
-        return 0.0
-    m = re.match(r"PT(?:(\d+)M)?(?:([\d.]+)S)?", s)
-    if not m:
-        return 0.0
-    mins = int(m.group(1) or 0)
-    secs = float(m.group(2) or 0)
-    return round(mins + secs / 60.0, 2)
 
-def season_end_year(game_id, game_date):
-    """gameId digits 3-4 are the season START year % 100 (e.g. 00225xxxxx ->
-    start 2025 -> end year 2026). Falls back to date heuristic (Aug+ = new
-    season start)."""
-    try:
-        yy = int(str(game_id)[3:5])
-        start = 2000 + yy if yy < 70 else 1900 + yy
-        return start + 1
-    except Exception:
-        d = datetime.strptime(game_date, "%Y-%m-%d").date()
-        return d.year + 1 if d.month >= 8 else d.year
+def num(v):
+    """Pass numbers through, keep genuine absences as null.
+    Same contract as backfill_boxscores.py."""
+    if v is None or v == "":
+        return None
+    return v
+
+
+def season_end_year_for(d):
+    """A date in Aug..Dec belongs to the season ending the NEXT year."""
+    return d.year + 1 if d.month >= 8 else d.year
+
+
+def season_str(sy):
+    """2026 -> '2025-26'."""
+    return f"{sy - 1}-{str(sy % 100).zfill(2)}"
+
 
 def read_ndjson_ids(path, key):
     ids = set()
@@ -126,200 +185,303 @@ def read_ndjson_ids(path, key):
                 continue
     return ids
 
+
 def append_ndjson(path, rows):
+    if not rows:
+        return
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         for r in rows:
-            f.write(json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
+            f.write(json.dumps(r, separators=(",", ":"),
+                               ensure_ascii=False) + "\n")
 
 
-# ---------------------------------------------------------------- schedule
-
-def load_schedule():
-    last_err = None
-    for url in SCHEDULE_URLS:
-        try:
-            j = fetch_json(url)
-            games = []
-            for gd in j["leagueSchedule"]["gameDates"]:
-                for g in gd.get("games", []):
-                    games.append(g)
-            log(f"schedule: {len(games)} games from {url}")
-            return games
-        except Exception as e:
-            last_err = e
-            log(f"schedule source failed, trying next: {e}")
-    raise RuntimeError(f"all schedule sources failed ({last_err})")
-
-def game_date_et(g):
-    """Prefer explicit ET fields; fall back to UTC datetime."""
-    for k in ("gameDateEst", "gameDateTimeEst", "homeTeamTime", "gameDateUTC", "gameDateTimeUTC"):
-        v = g.get(k)
-        if v:
-            m = re.match(r"(\d{4})-(\d{2})-(\d{2})", v)
-            if m:
-                return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-    return None
+def mdy(d):
+    """stats.nba.com wants MM/DD/YYYY for DateFrom/DateTo."""
+    return d.strftime("%m/%d/%Y")
 
 
-# ---------------------------------------------------------------- box score
+# ------------------------------------------------------------------ mapping
+# Both builders below mirror backfill_boxscores.py field for field. Any edit
+# here must be made there too, or the archive acquires two row shapes.
 
-def extract_rows(box, game_date, sy):
-    """Player-level rows from a liveData boxscore payload."""
-    g = box["game"]
-    gid = g["gameId"]
-    home, away = g["homeTeam"], g["awayTeam"]
-    game_row = {
-        "gameId": gid,
-        "date": game_date,
-        "sy": sy,
-        "home": home.get("teamTricode"),
-        "away": away.get("teamTricode"),
-        "homeScore": home.get("score"),
-        "awayScore": away.get("score"),
-    }
-    player_rows = []
-    for team, opp, is_home in ((home, away, 1), (away, home, 0)):
-        tri, opp_tri = team.get("teamTricode"), opp.get("teamTricode")
-        for p in team.get("players", []):
-            st = p.get("statistics", {}) or {}
-            if p.get("status") == "INACTIVE":
-                continue
-            player_rows.append({
-                "gameId": gid, "date": game_date, "sy": sy,
-                "team": tri, "opp": opp_tri, "homeGame": is_home,
-                "personId": p.get("personId"),
-                "name": p.get("name") or (p.get("firstName", "") + " " + p.get("familyName", "")).strip(),
-                "pos": p.get("position") or "",
-                "starter": 1 if str(p.get("starter", "0")) == "1" else 0,
-                "min": parse_iso_minutes(st.get("minutes")),
-                "fgm": st.get("fieldGoalsMade", 0), "fga": st.get("fieldGoalsAttempted", 0),
-                "tpm": st.get("threePointersMade", 0), "tpa": st.get("threePointersAttempted", 0),
-                "ftm": st.get("freeThrowsMade", 0), "fta": st.get("freeThrowsAttempted", 0),
-                "oreb": st.get("reboundsOffensive", 0), "dreb": st.get("reboundsDefensive", 0),
-                "reb": st.get("reboundsTotal", 0),
-                "ast": st.get("assists", 0), "stl": st.get("steals", 0),
-                "blk": st.get("blocks", 0), "tov": st.get("turnovers", 0),
-                "pf": st.get("foulsPersonal", 0), "pts": st.get("points", 0),
-                "pm": st.get("plusMinusPoints", 0),
-            })
-    return game_row, player_rows
+def games_from_team_rows(headers, rows, sy):
+    ti = {h: i for i, h in enumerate(headers)}
+    games = {}
+    for r in rows:
+        gid = r[ti["GAME_ID"]]
+        matchup = r[ti["MATCHUP"]] or ""
+        is_home = " vs. " in matchup
+        g = games.setdefault(gid, {"gameId": gid,
+                                   "date": (r[ti["GAME_DATE"]] or "")[:10],
+                                   "sy": sy, "home": None, "away": None,
+                                   "homeScore": None, "awayScore": None})
+        tri, pts = r[ti["TEAM_ABBREVIATION"]], num(r[ti["PTS"]])
+        if is_home:
+            g["home"], g["homeScore"] = tri, pts
+        else:
+            g["away"], g["awayScore"] = tri, pts
+    return games
 
 
-# ---------------------------------------------------------------- main
+def rows_from_player_rows(headers, rows, sy):
+    pi = {h: i for i, h in enumerate(headers)}
+
+    def col(r, name):
+        return num(r[pi[name]]) if name in pi else None
+
+    out = []
+    for r in rows:
+        matchup = r[pi["MATCHUP"]] or ""
+        out.append({
+            "gameId": r[pi["GAME_ID"]],
+            "date": (r[pi["GAME_DATE"]] or "")[:10], "sy": sy,
+            "team": r[pi["TEAM_ABBREVIATION"]],
+            "opp": matchup.split(" ")[-1] if matchup else None,
+            "homeGame": 1 if " vs. " in matchup else 0,
+            "personId": r[pi["PLAYER_ID"]],
+            "name": r[pi["PLAYER_NAME"]],
+            "min": col(r, "MIN"),
+            "fgm": col(r, "FGM"), "fga": col(r, "FGA"),
+            "tpm": col(r, "FG3M"), "tpa": col(r, "FG3A"),
+            "ftm": col(r, "FTM"), "fta": col(r, "FTA"),
+            "oreb": col(r, "OREB"), "dreb": col(r, "DREB"),
+            "reb": col(r, "REB"), "ast": col(r, "AST"),
+            "stl": col(r, "STL"), "blk": col(r, "BLK"),
+            "tov": col(r, "TOV"), "pf": col(r, "PF"),
+            "pts": col(r, "PTS"), "pm": col(r, "PLUS_MINUS"),
+        })
+    return out
+
+
+# ------------------------------------------------------------------ git
+
+def commit_and_push(root, msg):
+    try:
+        subprocess.run(["git", "add", "-A", "data", "state.json"],
+                       cwd=root, check=True)
+        if subprocess.run(["git", "diff", "--cached", "--quiet"],
+                          cwd=root).returncode == 0:
+            log("  nothing staged — no commit")
+            return True
+        subprocess.run(["git", "commit", "-m", msg], cwd=root, check=True)
+        subprocess.run(["git", "push"], cwd=root, check=True)
+        log(f"  pushed: {msg}")
+        return True
+    except subprocess.CalledProcessError as e:
+        log(f"  WARN: git commit/push failed ({e}) — data is on disk,"
+            f" push it by hand")
+        return False
+
+
+# ------------------------------------------------------------------ main
 
 def main():
-    # --- state
-    state = {"last_processed_date": None}
-    if os.path.exists(STATE_PATH):
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
-            state = json.load(f)
-    if not state.get("last_processed_date"):
-        log("state.json has no last_processed_date — set one first.")
-        sys.exit(1)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--repo", default="",
+                    help="repo root, if running from a copy of this script")
+    ap.add_argument("--since", default="",
+                    help="YYYY-MM-DD; overrides state.json")
+    ap.add_argument("--through", default="",
+                    help="YYYY-MM-DD; default is yesterday ET")
+    ap.add_argument("--preseason", action="store_true",
+                    help="ALSO ingest Pre Season — changes what the archive "
+                         "means; Global Rating totals would include it")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="fetch and report, write and commit nothing")
+    ap.add_argument("--no-push", action="store_true",
+                    help="write files but do not commit or push")
+    a = ap.parse_args()
 
-    start = datetime.strptime(state["last_processed_date"], "%Y-%m-%d").date() + timedelta(days=1)
-    end = today_et() - timedelta(days=1)      # through yesterday ET
-    if start > end:
-        log(f"nothing to do (state {state['last_processed_date']}, yesterday {end}).")
-        return
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+    log(f"update_boxscores.py {VERSION}")
 
-    log(f"processing ET dates {start} .. {end}")
-    schedule = load_schedule()
+    # ---- locate the repo
+    root = os.path.abspath(a.repo) if a.repo else os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(root, "data")
+    state_path = os.path.join(root, "state.json")
+    if not os.path.isdir(data_dir) or not os.path.exists(state_path):
+        log(f"  not a box-score repo: {root}")
+        log("  pass --repo with the path to your nba-boxscores clone")
+        return 2
+    log(f"  repo: {root}")
 
-    # candidate games: in window AND finished (gameStatus 3 = Final)
-    wanted = []
-    for g in schedule:
-        d = game_date_et(g)
-        if not d:
-            continue
-        gd = datetime.strptime(d, "%Y-%m-%d").date()
-        if start <= gd <= end and int(g.get("gameStatus", 0)) == 3:
-            wanted.append((g["gameId"], d))
-    log(f"{len(wanted)} final games in window")
+    run = {"version": VERSION, "started_utc": utc_stamp(),
+           "ok": False, "error": None, "dry_run": a.dry_run,
+           "seasons": {}, "games_added": 0, "rows_added": 0}
 
-    if len(wanted) > MAX_GAMES_PER_RUN:
-        wanted = sorted(wanted, key=lambda x: x[1])[:MAX_GAMES_PER_RUN]
-        log(f"capped to {MAX_GAMES_PER_RUN} this run; the rest catch up next run")
-
-    # group by season for dedup + append
-    season_cache = {}
-    def season_files(sy):
-        if sy not in season_cache:
-            sd = os.path.join(DATA_DIR, str(sy))
-            gpath, bpath = os.path.join(sd, "games.ndjson"), os.path.join(sd, "boxscores.ndjson")
-            season_cache[sy] = {"gpath": gpath, "bpath": bpath,
-                                "have": read_ndjson_ids(gpath, "gameId"),
-                                "new_games": [], "new_rows": []}
-        return season_cache[sy]
-
-    fetched = skipped = failed = 0
-    last_ok_date = state["last_processed_date"]
-    processed_dates = set()
-    for gid, d in sorted(wanted, key=lambda x: x[1]):
-        sy = season_end_year(gid, d)
-        sf = season_files(sy)
-        if gid in sf["have"]:
-            skipped += 1
-            processed_dates.add(d)
-            continue
+    def finish(code):
+        run["finished_utc"] = utc_stamp()
+        run["ok"] = (code == 0)
         try:
-            box = fetch_json(BOXSCORE_URL.format(gid=gid))
-            game_row, rows = extract_rows(box, d, sy)
-            sf["new_games"].append(game_row)
-            sf["new_rows"].extend(rows)
-            sf["have"].add(gid)
-            fetched += 1
-            processed_dates.add(d)
-            time.sleep(POLITE_DELAY)
-        except Exception as e:
-            failed += 1
-            log(f"  FAIL {gid} ({d}): {e}")
+            with open(os.path.join(root, "last_run.json"), "w",
+                      encoding="utf-8") as f:
+                json.dump(run, f, indent=2)
+        except Exception as e:                              # noqa: BLE001
+            log(f"  WARN: could not write last_run.json ({e})")
+        return code
 
-    # append per season
-    new_name_seasons = set()
-    for sy, sf in season_cache.items():
-        if sf["new_games"]:
-            append_ndjson(sf["gpath"], sorted(sf["new_games"], key=lambda r: (r["date"], r["gameId"])))
-            append_ndjson(sf["bpath"], sorted(sf["new_rows"], key=lambda r: (r["date"], r["gameId"], r["team"])))
-            for r in sf["new_rows"]:
-                if r.get("name"):
-                    new_name_seasons.add((r["name"], sy))
-            log(f"season {sy}: +{len(sf['new_games'])} games, +{len(sf['new_rows'])} player rows")
+    # ---- window
+    with open(state_path, "r", encoding="utf-8") as f:
+        state = json.load(f)
+    if a.since:
+        start = datetime.strptime(a.since, "%Y-%m-%d").date()
+    else:
+        lp = state.get("last_processed_date")
+        if not lp:
+            log("  state.json has no last_processed_date — set one first.")
+            run["error"] = "no last_processed_date"
+            return finish(1)
+        start = datetime.strptime(lp, "%Y-%m-%d").date() + timedelta(days=1)
+    end = (datetime.strptime(a.through, "%Y-%m-%d").date() if a.through
+           else today_et() - timedelta(days=1))
+    run["window"] = [start.isoformat(), end.isoformat()]
+    if start > end:
+        log(f"  nothing to do: window {start} .. {end} is empty"
+            f" (state {state.get('last_processed_date')})")
+        return finish(0)
+    log(f"  window: {start} .. {end} (ET)")
 
-    # keep data/player_index.json fresh (explorer's all-time player lookup)
-    if new_name_seasons:
-        ipath = os.path.join(DATA_DIR, "player_index.json")
+    stypes = list(STYPES) + ([PRESEASON] if a.preseason else [])
+    if a.preseason:
+        log("  PRESEASON INCLUDED — exhibition games will enter the archive"
+            " and Global Rating totals unless this is a --dry-run")
+
+    # A window can straddle a season boundary; ask each season it touches.
+    seasons = sorted({season_end_year_for(start), season_end_year_for(end)})
+    log(f"  season(s): {', '.join(season_str(s) for s in seasons)}")
+
+    failures = []
+    total_games = total_rows = 0
+    name_seasons = set()
+
+    for sy in seasons:
+        season = season_str(sy)
+        gpath = os.path.join(data_dir, str(sy), "games.ndjson")
+        bpath = os.path.join(data_dir, str(sy), "boxscores.ndjson")
+        have_games = read_ndjson_ids(gpath, "gameId")
+        have_rows = read_ndjson_ids(bpath, "gameId")
+        new_games, new_rows = [], []
+
+        for stype in stypes:
+            tag = f"{season} {stype}"
+            base = ("&DateFrom=" + mdy(start).replace("/", "%2F")
+                    + "&DateTo=" + mdy(end).replace("/", "%2F"))
+            try:
+                t_url = LGL_URL.format(pot="T", season=season.replace(" ", "+"),
+                                       stype=stype.replace(" ", "+")) + base
+                th, trows = result_rows(fetch_json(t_url))
+                time.sleep(POLITE_DELAY)
+                if not trows:
+                    log(f"  {tag}: no games in window")
+                    continue
+                p_url = LGL_URL.format(pot="P", season=season.replace(" ", "+"),
+                                       stype=stype.replace(" ", "+")) + base
+                ph, prows = result_rows(fetch_json(p_url))
+                time.sleep(POLITE_DELAY)
+
+                games = games_from_team_rows(th, trows, sy)
+                prs = rows_from_player_rows(ph, prows, sy)
+
+                add_g = [g for gid, g in games.items() if gid not in have_games]
+                for g in add_g:
+                    have_games.add(g["gameId"])
+                add_r = [r for r in prs if r["gameId"] not in have_rows]
+                for r in add_r:
+                    have_rows.add(r["gameId"])
+
+                new_games += add_g
+                new_rows += add_r
+                for r in add_r:
+                    if r.get("name"):
+                        name_seasons.add((r["name"], sy))
+                log(f"  {tag}: {len(games)} game(s) seen, +{len(add_g)} new,"
+                    f" +{len(add_r)} player row(s)"
+                    + ("  [already present]" if games and not add_g else ""))
+            except Exception as e:                          # noqa: BLE001
+                # A missing PlayIn or Playoffs block is normal; a failing
+                # Regular Season block is not, and must not pass quietly.
+                if stype in (PRESEASON, "PlayIn", "Playoffs"):
+                    log(f"  {tag}: unavailable ({e})")
+                else:
+                    failures.append(f"{tag}: {e}")
+                    log(f"  {tag}: FAILED ({e})")
+
+        run["seasons"][season] = {"games": len(new_games), "rows": len(new_rows)}
+        total_games += len(new_games)
+        total_rows += len(new_rows)
+
+        if a.dry_run:
+            for g in sorted(new_games, key=lambda x: (x["date"], x["gameId"]))[:8]:
+                log(f"      {g['date']}  {g['gameId']}  "
+                    f"{g['away']} {g['awayScore']} @ {g['home']} {g['homeScore']}")
+            if len(new_games) > 8:
+                log(f"      ... and {len(new_games) - 8} more")
+            continue
+
+        append_ndjson(gpath, sorted(new_games,
+                                    key=lambda x: (x["date"], x["gameId"])))
+        append_ndjson(bpath, sorted(new_rows,
+                                    key=lambda x: (x["date"], x["gameId"],
+                                                   x["team"] or "")))
+
+    run["games_added"] = total_games
+    run["rows_added"] = total_rows
+
+    if a.dry_run:
+        log(f"\n  DRY RUN — nothing written. {total_games} game(s),"
+            f" {total_rows} player row(s) would be added.")
+        if failures:
+            log("  failures: " + "; ".join(failures))
+            return finish(1)
+        return finish(0)
+
+    # ---- player index, same contract as v1
+    if name_seasons:
+        ipath = os.path.join(data_dir, "player_index.json")
         try:
             index = {}
             if os.path.exists(ipath):
                 with open(ipath, "r", encoding="utf-8") as f:
                     index = json.load(f)
             changed = False
-            for name, sy in new_name_seasons:
-                seasons = index.setdefault(name, [])
-                if sy not in seasons:
-                    seasons.append(sy); seasons.sort(); changed = True
+            for nm, sy in name_seasons:
+                ss = index.setdefault(nm, [])
+                if sy not in ss:
+                    ss.append(sy); ss.sort(); changed = True
             if changed:
                 with open(ipath, "w", encoding="utf-8") as f:
-                    json.dump(index, f, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
-                log("player_index.json updated")
-        except Exception as e:
-            log(f"WARN: player index update failed ({e}) — rebuild with build_player_index.py")
+                    json.dump(index, f, separators=(",", ":"),
+                              ensure_ascii=False, sort_keys=True)
+                log("  player_index.json updated")
+        except Exception as e:                              # noqa: BLE001
+            log(f"  WARN: player index update failed ({e})"
+                f" — rebuild with build_player_index.py")
 
-    # advance state only through the last date with NO failures, so a flaky
-    # day gets retried tomorrow instead of being skipped forever
-    if failed == 0:
-        new_state = end.isoformat()
+    # ---- state: advance only on a clean run, so a bad day is retried
+    if failures:
+        log(f"  {len(failures)} failure(s) — state NOT advanced, so the next"
+            f" run retries this window")
+        run["error"] = "; ".join(failures)
     else:
-        ok_dates = sorted(processed_dates)
-        new_state = ok_dates[-1] if ok_dates else last_ok_date
-        log(f"{failed} fetch failure(s) — state advances conservatively")
-    with open(STATE_PATH, "w", encoding="utf-8") as f:
-        json.dump({"last_processed_date": new_state, "updated_at": datetime.utcnow().isoformat() + "Z"}, f, indent=2)
+        with open(state_path, "w", encoding="utf-8") as f:
+            json.dump({"last_processed_date": end.isoformat(),
+                       "updated_at": utc_stamp()},
+                      f, indent=2)
+        log(f"  state -> {end.isoformat()}")
 
-    log(f"done: {fetched} fetched, {skipped} already present, {failed} failed; state -> {new_state}")
+    if not a.no_push and (total_games or total_rows or not failures):
+        commit_and_push(root, f"Update {date.today().isoformat()}:"
+                              f" +{total_games} game(s), +{total_rows} row(s)")
+
+    log(f"\n  done: +{total_games} game(s), +{total_rows} player row(s)"
+        + (f", {len(failures)} failure(s)" if failures else ""))
+    return finish(1 if failures else 0)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
